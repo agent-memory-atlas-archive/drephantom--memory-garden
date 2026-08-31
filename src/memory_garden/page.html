@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{NAME}} · Memory Garden</title>
+<style>
+ :root{--ink:#33302a;--sub:#8d8779;--pine:#3c5a47;--pine-soft:#eef0ea;--paper:#f7f5f0;
+        --card:#ffffff;--line:#e6e1d5;--accent:#b5a16b}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--paper);color:var(--ink);
+      font-family:"Source Han Serif SC","Noto Serif SC",system-ui,"Segoe UI",serif;
+      display:flex;flex-direction:column;height:100vh}
+ header{padding:18px 26px 14px;background:linear-gradient(180deg,#33493b,#3c5a47);color:#f4f2ea}
+ header .row{display:flex;align-items:baseline;gap:10px}
+ header h1{font-size:18px;margin:0;letter-spacing:1px}
+ header .en{font-size:12px;opacity:.55;letter-spacing:2px}
+ header p{margin:6px 0 0;font-size:12px;opacity:.72}
+ main{flex:1;overflow-y:auto}
+ .wrap{max-width:720px;margin:0 auto;padding:26px 20px 20px}
+ .turn{display:flex;gap:12px;margin-bottom:22px;align-items:flex-start}
+ .turn.mine{flex-direction:row-reverse}
+ .avatar{width:44px;height:44px;border-radius:50%;flex:none;display:flex;align-items:center;
+         justify-content:center;font-size:20px;font-weight:600;box-shadow:0 1px 3px rgba(60,80,60,.18)}
+ .avatar.her{background:var(--pine);color:#f4f2ea}
+ .avatar.me{background:#e8e2d2;color:var(--ink)}
+ .bubble{border-radius:14px;padding:12px 16px;line-height:1.85;max-width:78%;
+         font-size:15px;white-space:pre-wrap;word-break:break-word}
+ .turn.mine .bubble{background:var(--pine);color:#f4f2ea;border-bottom-right-radius:4px}
+ .turn.her .bubble{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+ .turn.her .bubble b{color:#5c4d2c}
+ .meta{font-size:11px;color:var(--sub);margin-top:10px}
+ .unknowns{font-size:12.5px;color:#8a6d3b;background:#faf6ec;border:1px solid #efe6cf;
+            border-radius:8px;padding:8px 12px;margin-top:10px}
+ .sources{margin-top:10px;font-size:12.5px;color:var(--sub)}
+ .copyrow{margin-top:8px}
+ .copy{font-size:11.5px;color:var(--sub);cursor:pointer;border-bottom:1px dashed #c9c2ad}
+ .copy:hover{color:var(--ink)}
+ .sources summary{cursor:pointer;color:#7a8a72}
+ .sources li{margin:3px 0}
+ .verdicts{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+ .verdicts button{background:var(--pine-soft);color:var(--ink);border:1px solid var(--line);
+                  border-radius:999px;font-size:12.5px;padding:6px 14px;cursor:pointer;font-family:inherit}
+ .verdicts button:hover{background:#e0e4d8}
+ .chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 18px}
+ .chips button{background:transparent;border:1px dashed #c9c2ad;color:var(--sub);
+               border-radius:999px;font-size:13px;padding:7px 14px;cursor:pointer;font-family:inherit}
+ .chips button:hover{color:var(--ink);border-color:var(--accent)}
+ .empty{color:var(--sub);font-size:14.5px;line-height:2;margin-bottom:4px}
+ .empty .hi{font-size:16px;color:var(--ink)}
+ footer{border-top:1px solid var(--line);background:#f2efe7}
+ .composer{max-width:720px;margin:0 auto;display:flex;gap:10px;padding:14px 20px}
+ textarea{flex:1;resize:none;border:1px solid #d8d2c2;border-radius:12px;padding:11px 14px;
+          font:inherit;font-size:14.5px;background:#fff;outline:none;font-family:inherit}
+ textarea:focus{border-color:var(--accent)}
+ button.send{background:var(--pine);color:#fff;border:0;border-radius:12px;padding:0 22px;
+             cursor:pointer;font-size:14.5px;font-family:inherit}
+ button.send:disabled{opacity:.5;cursor:default}
+</style></head><body>
+<header><div class="row"><h1>{{NAME}}</h1><span class="en">MEMORY GARDEN</span><nav style="margin-left:auto;font-size:12.5px;opacity:.85"><a href="/" style="color:#f4f2ea;text-decoration:none;margin-right:14px">对话</a><a href="/history" style="color:#f4f2ea;text-decoration:none;margin-right:14px">历史</a><a href="/settings" style="color:#f4f2ea;text-decoration:none">设置</a></nav></div>
+<p>她替你记着你的原话 · Vault 只读 · 证据不足时她会问你，而不是编造因果</p></header>
+<main><div class="wrap">
+<div class="empty">
+ <div class="hi">我在。你的每一句原话我都记得。</div>
+ 随便聊聊，或者从这些开始——
+</div>
+<div class="chips" id="chips"></div>
+<div id="chat"></div>
+</div></main>
+<footer><div class="composer">
+ <textarea id="q" rows="1" placeholder="问问{{NAME}}，或者只是说说今天……（Enter 发送，Shift+Enter 换行）"></textarea>
+ <button class="send" id="send">发送</button>
+</div></footer>
+<script>
+const chat = document.getElementById('chat');
+const HER = '{{NAME}}';
+const chipsBox = document.getElementById('chips');
+let currentThreadId = null;
+let submitting = false;
+
+const SEEDS = ['关于写作，我的想法变过吗？','人生的意义是什么呢','我过去和现在有变化吗','最近有什么我自己没注意到的变化？'];
+SEEDS.forEach(s => {
+  const b = document.createElement('button'); b.textContent = s;
+  b.onclick = () => { document.getElementById('q').value = s; submit(); };
+  chipsBox.appendChild(b);
+});
+
+function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+function render(text){
+  return esc(text)
+    .replace(/\[A\d+\]/g,'')
+    .replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>')
+    .replace(/^#{1,6}\s*/gm,'')
+    .replace(/^---+$/gm,'');
+}
+function add(role, text){
+  const turn = document.createElement('div');
+  turn.className = 'turn ' + (role==='user'?'mine':'her');
+  const av = document.createElement('div');
+  av.className = 'avatar ' + (role==='user'?'me':'her');
+  av.textContent = role==='user' ? '你' : HER;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.innerHTML = render(text);
+  if (role !== 'user') {
+    const copy = document.createElement('div');
+    copy.className = 'copyrow';
+    const c = document.createElement('span');
+    c.textContent = '复制';
+    c.className = 'copy';
+    c.onclick = function(){
+      navigator.clipboard.writeText(bubble.innerText).then(function(){
+        c.textContent = '已复制';
+        setTimeout(function(){ c.textContent = '复制'; }, 1500);
+      });
+    };
+    copy.appendChild(c);
+    bubble.appendChild(copy);
+  }
+  turn.appendChild(av); turn.appendChild(bubble);
+  chat.appendChild(turn);
+  const main = document.querySelector('main'); main.scrollTop = main.scrollHeight;
+  return bubble;
+}
+function addSources(bubble, citations){
+  if (!citations || !citations.length) return;
+  const box = document.createElement('details');
+  box.className = 'sources';
+  const seen = new Set(); let html = '';
+  citations.forEach(c => {
+    const key = String(c.atom_id) + String(c.recorded_at||'');
+    if (seen.has(key)) return; seen.add(key);
+    const date = String(c.event_time||c.recorded_at||'').slice(0,10);
+    html += '<li>' + (date||'日期不明') + ' · 《' + esc(c.title||'未命名') + '》' +
+            (c.excerpt ? '：' + esc(String(c.excerpt).slice(0,60)) : '') + '</li>';
+  });
+  if (!html) return;
+  box.innerHTML = '<summary>她引用的你的原话（' + seen.size + ' 条）</summary><ul>' + html + '</ul>';
+  bubble.appendChild(box);
+}
+function addVerdicts(bubble, messageId){
+  const bar = document.createElement('div'); bar.className='verdicts';
+  [['accurate','说得对'],['partly_accurate','部分对'],['no_change','不构成变化'],
+   ['not_my_view','不是我的观点'],['insufficient_evidence','证据不足'],['defer','先不判断']]
+  .forEach(function(pair){
+    const v = pair[0], label = pair[1];
+    const b=document.createElement('button'); b.textContent=label;
+    b.onclick=function(){
+      fetch('/api/verdict',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({message_id:messageId,verdict:v})})
+        .then(function(r){return r.json()})
+        .then(function(){
+          bar.innerHTML='';
+          const ok=document.createElement('span'); ok.className='meta';
+          ok.textContent='嗯，我记住了。下次同一主题，我会按你说的来。';
+          bar.appendChild(ok);
+        });
+    };
+    bar.appendChild(b);
+  });
+  bubble.appendChild(bar);
+}
+function submit(){
+  if (submitting) return;
+  const q = document.getElementById('q');
+  const text = (q.value||'').trim(); if (!text) return;
+  submitting = true; document.getElementById('send').disabled = true;
+  add('user', text); q.value=''; q.style.height='auto';
+
+  const turn = document.createElement('div'); turn.className='turn her';
+  turn.innerHTML = '<div class="avatar her">' + HER + '</div><div class="bubble"><span class="think"></span></div>';
+  chat.appendChild(turn);
+  const main = document.querySelector('main'); main.scrollTop = main.scrollHeight;
+  const bubble = turn.querySelector('.bubble');
+  const think = bubble.querySelector('.think');
+  const t0 = Date.now();
+  const timer = setInterval(function(){
+    const s = Math.round((Date.now()-t0)/1000);
+    think.textContent = '我在翻你的记录… ' + s + 's';
+  }, 800);
+  const controller = new AbortController();
+  const abortTimer = setTimeout(function(){controller.abort()}, 360000);
+  let data = null, failed = false;
+  fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({question:text, thread_id: currentThreadId}), signal: controller.signal})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ data = d; })
+    .catch(function(){ failed = true; })
+    .finally(function(){
+      clearInterval(timer); clearTimeout(abortTimer);
+      submitting = false; document.getElementById('send').disabled = false;
+      if (failed) {
+        bubble.innerHTML = render('这次超过六分钟没有回来，可能是网络或模型服务在闹脾气。再试一次？带主题词的提问会快很多。');
+        return;
+      }
+      currentThreadId = data.thread_id || currentThreadId;
+      bubble.innerHTML = render(data.reply || '（我一时不知道说什么）');
+      addSources(bubble, data.answer && data.answer.citations);
+      if (data.verdict_worthy){
+        if (data.unknowns && data.unknowns.length){
+          const u=document.createElement('div'); u.className='unknowns';
+          u.textContent='还没确定的：' + data.unknowns.join('；');
+          bubble.appendChild(u);
+        }
+        if (data.message_id) addVerdicts(bubble, data.message_id);
+      }
+      main.scrollTop = main.scrollHeight;
+    });
+}
+
+const q = document.getElementById('q');
+document.getElementById('send').onclick = submit;
+q.addEventListener('keydown', function(e){
+  if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); submit(); }
+});
+q.addEventListener('input', function(){ q.style.height='auto'; q.style.height=Math.min(q.scrollHeight,140)+'px'; });
+
+function isConclusion(a){
+  return !!a && (a.answer_type==='traced_change' || a.answer_type==='no_clear_change' || !!a.question_to_user);
+}
+function renderRestored(msgs){
+  chat.innerHTML = ''; chipsBox.style.display = 'none';
+  const emptyBox = document.querySelector('.empty'); if (emptyBox) emptyBox.style.display = 'none';
+  msgs.forEach(function(m, i){
+    if (m.role === 'user'){ add('user', m.content); return; }
+    const b = add('assistant', m.content);
+    if (m.answer){
+      addSources(b, m.answer.citations);
+      if (isConclusion(m.answer) && m.answer.unknowns && m.answer.unknowns.length){
+        const real = m.answer.unknowns.filter(function(u){
+          return u.indexOf('现有来源不能证明') === -1 && u.indexOf('尚未经用户确认') === -1;
+        });
+        if (real.length){
+          const u = document.createElement('div'); u.className = 'unknowns';
+          u.textContent = '还没确定的：' + real.join('；');
+          b.appendChild(u);
+        }
+      }
+      if (isConclusion(m.answer) && i === msgs.length - 1 && m.id){
+        addVerdicts(b, m.id);
+      }
+    }
+  });
+}
+function loadThread(id){
+  currentThreadId = id;
+  fetch('/api/threads/' + id).then(function(r){ return r.json(); }).then(function(msgs){
+    if (msgs && msgs.length) renderRestored(msgs);
+  });
+}
+const params = new URLSearchParams(location.search);
+fetch('/api/threads').then(function(r){ return r.json(); }).then(function(ts){
+  const want = params.get('thread') || (ts.length ? ts[0].thread_id : null);
+  if (want) loadThread(want);
+});
+</script></body></html>

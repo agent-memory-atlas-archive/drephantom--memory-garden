@@ -1,0 +1,14 @@
+.venv/
+.local/
+.env
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+*.egg-info/
+
+# 本地私有评测与求职材料，不入库
+evals/retrieval_goldens.real.json
+docs/RESUME.md

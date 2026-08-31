@@ -1,0 +1,102 @@
+{
+  "description": "检索评测 golden 集。每组标注人工完成；synthetic 组用于 CI 确定性回归；real 组含私人笔记标题，保存在本地 retrieval_goldens.real.json（不入库）。",
+  "groups": {
+    "synthetic": [
+      {
+        "query": "自主判断",
+        "relevant_paths": [
+          "自主判断-2019.md",
+          "自主判断-2024.md"
+        ]
+      },
+      {
+        "query": "只有别人认可我的选择我才敢相信自己",
+        "relevant_paths": [
+          "自主判断-2019.md"
+        ]
+      },
+      {
+        "query": "先形成自己的判断再听取别人意见",
+        "relevant_paths": [
+          "自主判断-2024.md"
+        ]
+      },
+      {
+        "query": "面对重要选择仍会向朋友求证",
+        "relevant_paths": [
+          "自主判断-2022反例.md"
+        ]
+      },
+      {
+        "query": "第一次独立负责项目的复盘",
+        "relevant_paths": [
+          "自主判断-2021经历.md"
+        ]
+      },
+      {
+        "query": "完美主义 准备",
+        "relevant_paths": [
+          "完美主义-2019.md",
+          "完美主义-2024.md"
+        ]
+      },
+      {
+        "query": "先完成一个能工作的版本再修正",
+        "relevant_paths": [
+          "完美主义-2024.md"
+        ]
+      },
+      {
+        "query": "换咖啡豆",
+        "relevant_paths": [
+          "相邻事件-咖啡.md"
+        ]
+      },
+      {
+        "query": "重要决定前收集信息",
+        "relevant_paths": [
+          "谨慎决策-2020.md",
+          "谨慎决策-2024.md"
+        ]
+      },
+      {
+        "query": "一个人恢复精力",
+        "relevant_paths": [
+          "独处-2020.md",
+          "一个人-2024.md"
+        ]
+      },
+      {
+        "query": "独处",
+        "relevant_paths": [
+          "独处-2020.md",
+          "一个人-2024.md"
+        ]
+      },
+      {
+        "query": "边界",
+        "relevant_paths": [
+          "边界-仅近期.md"
+        ]
+      },
+      {
+        "query": "书摘里的独立",
+        "relevant_paths": [
+          "引用-独立.md"
+        ]
+      },
+      {
+        "query": "AI 生成的草稿",
+        "relevant_paths": [
+          "AI草稿-独立.md"
+        ]
+      },
+      {
+        "query": "延迟补记的转折经历",
+        "relevant_paths": [
+          "延迟记录的经历.md"
+        ]
+      }
+    ]
+  }
+}

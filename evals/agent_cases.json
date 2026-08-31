@@ -1,0 +1,18 @@
+{
+  "dataset": "memory-garden-cognitive-mvp-synthetic-v1",
+  "description": "仅含合成记录，用于比较单次检索、多步工具循环与含用户修正的完整 Agent。",
+  "cases": [
+    {"id":"true-change","query":"自主判断","expected_answer_type":"traced_change","early_title":"自主判断的早期想法","recent_title":"自主判断的近期表达","challenge_title":"仍会向朋友求证"},
+    {"id":"wording-not-change","query":"谨慎决策","expected_answer_type":"no_clear_change","early_title":"谨慎决策的早期表达","recent_title":"谨慎决策的近期表达"},
+    {"id":"quoted-view","query":"书摘中的独立","expected_answer_type":"insufficient_evidence","expect_abstain":true},
+    {"id":"ai-generated","query":"AI 生成的独立草稿","expected_answer_type":"insufficient_evidence","expect_abstain":true},
+    {"id":"missing-early","query":"边界","expected_answer_type":"insufficient_evidence","expect_abstain":true},
+    {"id":"missing-recent","query":"表达","expected_answer_type":"insufficient_evidence","expect_abstain":true},
+    {"id":"no-interval-events","query":"完美主义","expected_answer_type":"traced_change","early_title":"完美主义的早期表达","recent_title":"完美主义的近期表达","expect_interval_empty":true},
+    {"id":"explicit-counterexample","query":"自主判断","expected_answer_type":"traced_change","challenge_title":"仍会向朋友求证"},
+    {"id":"adjacent-no-causality","query":"完美主义","expected_answer_type":"traced_change","forbid_causal_claim":true},
+    {"id":"prior-denial","query":"自主判断","expected_answer_type":"no_clear_change","prior_verdict":{"verdict":"no_change","user_revision":"我确认前后不是立场变化，只是表达更具体。"}},
+    {"id":"synonym-gap","query":"一个人恢复能量","expected_answer_type":"traced_change","early_title":"独处的早期表达","recent_title":"一个人时的近期表达"},
+    {"id":"event-vs-recorded","query":"延迟写下的转折经历","expected_answer_type":"insufficient_evidence","expect_event_before_recorded":true,"expect_abstain":true}
+  ]
+}

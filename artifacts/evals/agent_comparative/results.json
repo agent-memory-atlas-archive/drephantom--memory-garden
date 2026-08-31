@@ -1,0 +1,483 @@
+{
+ "summary": {
+  "configs": {
+   "one_shot_baseline": {
+    "task_completion": 0.4167,
+    "citation_valid": 1.0,
+    "counter_coverage": 0.0,
+    "abstention_correct": 0.4167,
+    "feedback_adherence": 0.0,
+    "no_causal_claim": 0.0,
+    "pass_rate": 0.3333
+   },
+   "agent_without_feedback": {
+    "task_completion": 0.9167,
+    "citation_valid": 1.0,
+    "counter_coverage": 1.0,
+    "abstention_correct": 1.0,
+    "feedback_adherence": 0.0,
+    "no_causal_claim": 1.0,
+    "pass_rate": 0.9167
+   },
+   "full_agent": {
+    "task_completion": 1.0,
+    "citation_valid": 1.0,
+    "counter_coverage": 1.0,
+    "abstention_correct": 1.0,
+    "feedback_adherence": 1.0,
+    "no_causal_claim": 1.0,
+    "pass_rate": 1.0
+   }
+  },
+  "total_cases": 12
+ },
+ "cases": [
+  {
+   "case_id": "true-change",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": false,
+    "citation_valid": true,
+    "abstention_correct": false,
+    "counter_coverage": false
+   },
+   "passed": false,
+   "reply": "关于「自主判断」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "wording-not-change",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": false,
+    "citation_valid": true,
+    "abstention_correct": false
+   },
+   "passed": false,
+   "reply": "关于「谨慎决策」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "quoted-view",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "关于「书摘中的独立」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "ai-generated",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "关于「AI 生成的独立草稿」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "missing-early",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "关于「边界」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "missing-recent",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "关于「表达」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "no-interval-events",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": false,
+    "citation_valid": true,
+    "abstention_correct": false
+   },
+   "passed": false,
+   "reply": "关于「完美主义」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "explicit-counterexample",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": false,
+    "citation_valid": true,
+    "abstention_correct": false,
+    "counter_coverage": false
+   },
+   "passed": false,
+   "reply": "关于「自主判断」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "adjacent-no-causality",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": false,
+    "citation_valid": true,
+    "abstention_correct": false,
+    "no_causal_claim": false
+   },
+   "passed": false,
+   "reply": "关于「完美主义」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "prior-denial",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": false,
+    "citation_valid": true,
+    "abstention_correct": false,
+    "feedback_adherence": false
+   },
+   "passed": false,
+   "reply": "关于「自主判断」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "synonym-gap",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": false,
+    "citation_valid": true,
+    "abstention_correct": false
+   },
+   "passed": false,
+   "reply": "关于「一个人恢复能量」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "event-vs-recorded",
+   "config": "one_shot_baseline",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "event_time_respected": false
+   },
+   "passed": false,
+   "reply": "关于「延迟写下的转折经历」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"
+  },
+  {
+   "case_id": "true-change",
+   "config": "agent_without_feedback",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "counter_coverage": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A10] 与近期记录 [A13] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "wording-not-change",
+   "config": "agent_without_feedback",
+   "answer_type": "no_clear_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A15] 与近期记录 [A16] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "quoted-view",
+   "config": "agent_without_feedback",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A11] 与近期记录 [A17] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "ai-generated",
+   "config": "agent_without_feedback",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A8] 与近期记录 [A13] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "missing-early",
+   "config": "agent_without_feedback",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A17] 与近期记录 [A17] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "missing-recent",
+   "config": "agent_without_feedback",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A14] 与近期记录 [A17] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "no-interval-events",
+   "config": "agent_without_feedback",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A3] 与近期记录 [A4] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "explicit-counterexample",
+   "config": "agent_without_feedback",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "counter_coverage": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A10] 与近期记录 [A13] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "adjacent-no-causality",
+   "config": "agent_without_feedback",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "no_causal_claim": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A3] 与近期记录 [A4] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "prior-denial",
+   "config": "agent_without_feedback",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": false,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "feedback_adherence": false
+   },
+   "passed": false,
+   "reply": "基于本轮核对：早期记录 [A10] 与近期记录 [A13] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "synonym-gap",
+   "config": "agent_without_feedback",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A8] 与近期记录 [A2] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "event-vs-recorded",
+   "config": "agent_without_feedback",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "event_time_respected": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A3] 与近期记录 [A4] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "true-change",
+   "config": "full_agent",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "counter_coverage": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A10] 与近期记录 [A13] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "wording-not-change",
+   "config": "full_agent",
+   "answer_type": "no_clear_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A15] 与近期记录 [A16] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "quoted-view",
+   "config": "full_agent",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A11] 与近期记录 [A17] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "ai-generated",
+   "config": "full_agent",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A8] 与近期记录 [A13] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "missing-early",
+   "config": "full_agent",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A17] 与近期记录 [A17] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "missing-recent",
+   "config": "full_agent",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A14] 与近期记录 [A17] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "no-interval-events",
+   "config": "full_agent",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A3] 与近期记录 [A4] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "explicit-counterexample",
+   "config": "full_agent",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "counter_coverage": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A10] 与近期记录 [A13] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "adjacent-no-causality",
+   "config": "full_agent",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "no_causal_claim": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A3] 与近期记录 [A4] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "prior-denial",
+   "config": "full_agent",
+   "answer_type": "no_clear_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "feedback_adherence": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A10] 与近期记录 [A13] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "synonym-gap",
+   "config": "full_agent",
+   "answer_type": "traced_change",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A8] 与近期记录 [A2] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  },
+  {
+   "case_id": "event-vs-recorded",
+   "config": "full_agent",
+   "answer_type": "insufficient_evidence",
+   "checks": {
+    "task_completion": true,
+    "citation_valid": true,
+    "abstention_correct": true,
+    "event_time_respected": true
+   },
+   "passed": true,
+   "reply": "基于本轮核对：早期记录 [A3] 与近期记录 [A4] 的表达存在差异，值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+  }
+ ]
+}

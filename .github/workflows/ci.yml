@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Lint
+        run: uv run ruff check src tests
+      - name: Type check (focused)
+        run: uv run mypy src/memory_garden/models.py src/memory_garden/config.py src/memory_garden/db.py src/memory_garden/retrieval.py src/memory_garden/tools.py src/memory_garden/agent.py src/memory_garden/cognitive.py src/memory_garden/evaluation.py
+      - name: Test
+        run: uv run pytest --cov=memory_garden --cov-report=term-missing
+      - name: Offline comparative eval (protocol compliance)
+        run: uv run memory-garden init && uv run memory-garden eval-agent --output artifacts/evals/ci_comparative
+      - name: Retrieval eval on synthetic goldens
+        run: uv run memory-garden eval-retrieval --group synthetic --output artifacts/evals/ci_retrieval
+      - name: Upload eval artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-artifacts
+          path: artifacts/evals/

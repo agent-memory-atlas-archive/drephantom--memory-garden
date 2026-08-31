@@ -1,0 +1,233 @@
+{
+ "expectations": {
+  "expected_pairs": [
+   [
+    "自主判断-2019.md",
+    "自主判断-2024.md"
+   ],
+   [
+    "完美主义-2019.md",
+    "完美主义-2024.md"
+   ],
+   [
+    "独处-2020.md",
+    "一个人-2024.md"
+   ]
+  ],
+  "expected_contrast_notes": [
+   "显式对比-写作.md"
+  ],
+  "excluded_pairs": [
+   [
+    "谨慎决策-2020.md",
+    "谨慎决策-2024.md"
+   ]
+  ]
+ },
+ "summary": {
+  "snapshots_extracted": 17,
+  "candidates_returned": 7,
+  "expected_pair_recall": 1.0,
+  "excluded_pair_leak": 0,
+  "related_adjacent_pairs": 2,
+  "false_positives": 1,
+  "precision_strict": 0.5714,
+  "precision_judged": 0.8,
+  "candidates": [
+   {
+    "discovery_id": 68,
+    "topic": "写作",
+    "topic_key": "contrast:7",
+    "early_atom_id": 7,
+    "recent_atom_id": 7,
+    "early_date": "2024-10-01",
+    "recent_date": "2024-10-01",
+    "early_excerpt": "以前我以为写作要先打动自己，现在",
+    "recent_excerpt": "以前我以为写作要先打动自己，现在",
+    "diff_terms": [],
+    "score": 0.765,
+    "question_to_user": "你自己写过：「以前我以为写作要先打动自己，现在」。这句话里藏着一次你亲口承认的转变——还成立吗？",
+    "early_path": "显式对比-写作.md",
+    "recent_path": "显式对比-写作.md",
+    "pair": [
+     "显式对比-写作.md",
+     "显式对比-写作.md"
+    ]
+   },
+   {
+    "discovery_id": 69,
+    "topic": "自主判断",
+    "topic_key": "snap:自主判断",
+    "early_atom_id": 10,
+    "recent_atom_id": 11,
+    "early_date": "2019-03-10",
+    "recent_date": "2021-05-30",
+    "early_excerpt": "那时我总觉得，只有别人认可我的选择，我才敢相信自己没有走错",
+    "recent_excerpt": "第一次独立负责项目时我做错了决定，也自己完成了复盘",
+    "diff_terms": [
+     "决定",
+     "别人",
+     "只有",
+     "复盘",
+     "完成",
+     "独立",
+     "相信",
+     "第一次"
+    ],
+    "score": 0.5,
+    "question_to_user": "关于「自主判断」：2019-03-10 你写「那时我总觉得，只有别人认可我的选择，我才敢相信自己没有走错」，2021-05-30 你写「第一次独立负责项目时我做错了决定，也自己完成了复盘」。这是表达更具体了，还是你的想法真的变了？",
+    "early_path": "自主判断-2019.md",
+    "recent_path": "自主判断-2021经历.md",
+    "pair": [
+     "自主判断-2019.md",
+     "自主判断-2021经历.md"
+    ]
+   },
+   {
+    "discovery_id": 70,
+    "topic": "自主判断",
+    "topic_key": "snap:自主判断",
+    "early_atom_id": 11,
+    "recent_atom_id": 12,
+    "early_date": "2021-05-30",
+    "recent_date": "2022-11-02",
+    "early_excerpt": "第一次独立负责项目时我做错了决定，也自己完成了复盘",
+    "recent_excerpt": "面对重要选择，我有时仍会先问朋友，借别人的视角检查自己的盲点",
+    "diff_terms": [
+     "仍会",
+     "先问",
+     "决定",
+     "别人",
+     "复盘",
+     "完成",
+     "有时",
+     "朋友"
+    ],
+    "score": 0.5,
+    "question_to_user": "关于「自主判断」：2021-05-30 你写「第一次独立负责项目时我做错了决定，也自己完成了复盘」，2022-11-02 你写「面对重要选择，我有时仍会先问朋友，借别人的视角检查自己的盲点」。这是表达更具体了，还是你的想法真的变了？",
+    "early_path": "自主判断-2021经历.md",
+    "recent_path": "自主判断-2022反例.md",
+    "pair": [
+     "自主判断-2021经历.md",
+     "自主判断-2022反例.md"
+    ]
+   },
+   {
+    "discovery_id": 71,
+    "topic": "自主判断",
+    "topic_key": "snap:自主判断",
+    "early_atom_id": 12,
+    "recent_atom_id": 13,
+    "early_date": "2022-11-02",
+    "recent_date": "2024-09-12",
+    "early_excerpt": "面对重要选择，我有时仍会先问朋友，借别人的视角检查自己的盲点",
+    "recent_excerpt": "我现在更愿意先形成自己的判断，再听取别人意见",
+    "diff_terms": [
+     "仍会",
+     "先问",
+     "判断",
+     "听取",
+     "形成",
+     "意见",
+     "愿意",
+     "有时"
+    ],
+    "score": 0.5,
+    "question_to_user": "关于「自主判断」：2022-11-02 你写「面对重要选择，我有时仍会先问朋友，借别人的视角检查自己的盲点」，2024-09-12 你写「我现在更愿意先形成自己的判断，再听取别人意见」。这是表达更具体了，还是你的想法真的变了？",
+    "early_path": "自主判断-2022反例.md",
+    "recent_path": "自主判断-2024.md",
+    "pair": [
+     "自主判断-2022反例.md",
+     "自主判断-2024.md"
+    ]
+   },
+   {
+    "discovery_id": 72,
+    "topic": "自主判断",
+    "topic_key": "snap:自主判断",
+    "early_atom_id": 10,
+    "recent_atom_id": 13,
+    "early_date": "2019-03-10",
+    "recent_date": "2024-09-12",
+    "early_excerpt": "那时我总觉得，只有别人认可我的选择，我才敢相信自己没有走错",
+    "recent_excerpt": "我现在更愿意先形成自己的判断，再听取别人意见",
+    "diff_terms": [
+     "判断",
+     "只有",
+     "听取",
+     "形成",
+     "意见",
+     "愿意",
+     "相信",
+     "认可"
+    ],
+    "score": 0.5,
+    "question_to_user": "关于「自主判断」：2019-03-10 你写「那时我总觉得，只有别人认可我的选择，我才敢相信自己没有走错」，2024-09-12 你写「我现在更愿意先形成自己的判断，再听取别人意见」。这是表达更具体了，还是你的想法真的变了？",
+    "early_path": "自主判断-2019.md",
+    "recent_path": "自主判断-2024.md",
+    "pair": [
+     "自主判断-2019.md",
+     "自主判断-2024.md"
+    ]
+   },
+   {
+    "discovery_id": 73,
+    "topic": "完美主义",
+    "topic_key": "snap:完美主义",
+    "early_atom_id": 3,
+    "recent_atom_id": 4,
+    "early_date": "2019-08-08",
+    "recent_date": "2024-08-08",
+    "early_excerpt": "只有准备到完全没有漏洞，我才觉得可以开始",
+    "recent_excerpt": "我现在更愿意先完成一个能工作的版本，再根据反馈修正",
+    "diff_terms": [
+     "修正",
+     "准备",
+     "反馈",
+     "只有",
+     "完全",
+     "完成",
+     "工作",
+     "开始"
+    ],
+    "score": 0.3333,
+    "question_to_user": "关于「完美主义」：2019-08-08 你写「只有准备到完全没有漏洞，我才觉得可以开始」，2024-08-08 你写「我现在更愿意先完成一个能工作的版本，再根据反馈修正」。这是表达更具体了，还是你的想法真的变了？",
+    "early_path": "完美主义-2019.md",
+    "recent_path": "完美主义-2024.md",
+    "pair": [
+     "完美主义-2019.md",
+     "完美主义-2024.md"
+    ]
+   },
+   {
+    "discovery_id": 74,
+    "topic": "独处",
+    "topic_key": "snap:独处",
+    "early_atom_id": 8,
+    "recent_atom_id": 2,
+    "early_date": "2020-05-05",
+    "recent_date": "2024-05-05",
+    "early_excerpt": "独处让我慢慢恢复精力，我需要给自己留出安静时间",
+    "recent_excerpt": "一个人待着不是逃避社交，而是给注意力充电",
+    "diff_terms": [
+     "不是",
+     "人待",
+     "充电",
+     "安静",
+     "恢复",
+     "慢慢",
+     "时间",
+     "注意力"
+    ],
+    "score": 0.3333,
+    "question_to_user": "关于「独处」：2020-05-05 你写「独处让我慢慢恢复精力，我需要给自己留出安静时间」，2024-05-05 你写「一个人待着不是逃避社交，而是给注意力充电」。这是表达更具体了，还是你的想法真的变了？",
+    "early_path": "独处-2020.md",
+    "recent_path": "一个人-2024.md",
+    "pair": [
+     "一个人-2024.md",
+     "独处-2020.md"
+    ]
+   }
+  ]
+ }
+}
