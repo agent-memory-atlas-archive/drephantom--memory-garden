@@ -4,23 +4,24 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from .config import Settings
 from .db import Database
-from .retrieval import BM25Retriever, HybridRetriever, VectorRetriever
+from .retrieval import (
+    build_private_api_evaluation_retrievers,
+    build_private_local_evaluation_retrievers,
+    build_public_evaluation_retrievers,
+    build_retriever,
+)
 
 
 def build_database(settings: Settings) -> Database:
     database = Database(settings.database_path)
     database.initialize()
     return database
-
-
-def build_retriever(database: Database, settings: Settings) -> HybridRetriever:
-    embedding_client = None
-    vector = VectorRetriever(database, embedding_client)
-    return HybridRetriever(BM25Retriever(database), vector)
 
 
 def _print_candidates(candidates) -> None:
@@ -41,6 +42,24 @@ def _print_candidates(candidates) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="memory-garden", description="认知回溯 Agent")
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=["bm25", "hash_vector", "embedding", "hybrid"],
+        default=None,
+        help="覆盖 MG_RETRIEVAL_MODE（需放在子命令前）",
+    )
+    parser.add_argument(
+        "--embedding-backend",
+        choices=["local_hash", "mock", "api"],
+        default=None,
+        help="覆盖 MG_EMBEDDING_BACKEND（embedding/hybrid 使用）",
+    )
+    parser.add_argument(
+        "--reranker",
+        choices=["none", "local_heuristic", "api"],
+        default=None,
+        help="覆盖 MG_RERANKER_BACKEND（只对 hybrid 生效）",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init", help="初始化数据库并同步 Vault")
@@ -57,8 +76,22 @@ def main(argv: list[str] | None = None) -> int:
     review.add_argument("--missing-event", default="")
     eval_agent = sub.add_parser("eval-agent", help="运行三配置对比评测（离线确定性）")
     eval_agent.add_argument("--output", default="artifacts/evals/agent_comparative")
-    eval_retr = sub.add_parser("eval-retrieval", help="运行检索双路指标")
-    eval_retr.add_argument("--group", choices=["synthetic", "real", "all"], default="all")
+    eval_retr = sub.add_parser("eval-retrieval", help="运行 BM25/哈希/Embedding/Hybrid 四路指标")
+    eval_retr.add_argument(
+        "--group",
+        choices=["synthetic", "real_dev", "real_test", "real", "all"],
+        default="synthetic",
+    )
+    eval_retr.add_argument(
+        "--real-models",
+        action="store_true",
+        help="真实组显式调用已配置的 API Embedding + API cross-encoder rerank",
+    )
+    eval_retr.add_argument(
+        "--include-draft-goldens",
+        action="store_true",
+        help="允许运行尚未经 Vault 所有者确认的草稿标注；结果不得作为正式 test 成绩",
+    )
     eval_retr.add_argument("--output", default="artifacts/evals/retrieval")
     sub.add_parser("extract-snapshots", help="离线抽取立场快照（自动选择 LLM/确定性）")
     eval_disc = sub.add_parser("eval-discovery", help="合成库发现精度评测")
@@ -69,6 +102,158 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     settings = Settings.load()
+    if args.retrieval_mode:
+        settings = replace(settings, retrieval_mode=args.retrieval_mode)
+    if args.embedding_backend:
+        settings = replace(settings, embedding_backend=args.embedding_backend)
+    if args.reranker:
+        settings = replace(settings, reranker_backend=args.reranker)
+
+    if args.command == "eval-retrieval":
+        from .evaluation import audit_retrieval_golden_groups, eval_retrieval_detailed
+        from .importer import VaultSyncService
+
+        repo_root = Path(__file__).resolve().parents[2]
+        goldens_doc = json.loads(
+            (repo_root / "evals" / "retrieval_goldens.json").read_text(encoding="utf-8")
+        )
+        real_goldens_path = repo_root / "evals" / "retrieval_goldens.real.json"
+        private_groups: dict[str, list[dict[str, object]]] = {}
+        private_audit: dict[str, object] | None = None
+        if real_goldens_path.exists():
+            real_doc = json.loads(real_goldens_path.read_text(encoding="utf-8"))
+            private_groups = real_doc.get("groups", {})
+            private_audit = audit_retrieval_golden_groups(private_groups)
+            goldens_doc["groups"].update(private_groups)
+            if "real_dev" in private_groups and "real_test" in private_groups:
+                goldens_doc["groups"]["real"] = [
+                    *private_groups["real_dev"],
+                    *private_groups["real_test"],
+                ]
+        if args.group == "all":
+            wanted = ["synthetic"]
+            if "real_dev" in goldens_doc["groups"] and "real_test" in goldens_doc["groups"]:
+                wanted.extend(["real_dev", "real_test"])
+            else:
+                wanted.append("real")
+        else:
+            wanted = [args.group]
+        selected_private = {
+            group: goldens_doc["groups"][group]
+            for group in wanted
+            if group != "synthetic" and group in goldens_doc["groups"]
+        }
+        if selected_private:
+            selected_audit = audit_retrieval_golden_groups(selected_private)
+            if selected_audit["draft_case_count"] and not args.include_draft_goldens:
+                raise SystemExit(
+                    "所选私有 golden 含未经 Vault 所有者确认的草稿标注；默认拒绝把它们当正式成绩。"
+                    "请先复核 annotation_status，或仅为草稿诊断显式传入 "
+                    "--include-draft-goldens。"
+                )
+            if selected_audit["draft_case_count"]:
+                print(
+                    "注意：本次包含草稿标注，输出只能用于标注审计，不是正式 test 成绩。",
+                    file=sys.stderr,
+                )
+        retrieval_report: dict[str, object] = {}
+        diagnostics_report: dict[str, object] = {}
+        for group in wanted:
+            if group not in goldens_doc["groups"]:
+                raise SystemExit(
+                    f"golden 组 {group!r} 不可用。真实组含私人笔记标题，不入公开仓库；"
+                    "如需评测，请在本地放置 evals/retrieval_goldens.real.json 后重试。"
+                )
+            if group == "synthetic":
+                with tempfile.TemporaryDirectory() as tmp:
+                    eval_settings = Settings(
+                        vault_path=repo_root / "evals" / "cognitive_mvp_vault",
+                        database_path=Path(tmp) / "retrieval-eval.db",
+                    )
+                    eval_db = build_database(eval_settings)
+                    try:
+                        VaultSyncService(eval_db, eval_settings.vault_path).sync()
+                        routes = build_public_evaluation_retrievers(eval_db, eval_settings)
+                        detailed = eval_retrieval_detailed(
+                            routes, goldens_doc["groups"][group]
+                        )
+                        retrieval_report[group] = detailed["summary"]
+                        diagnostics_report[group] = {
+                            "cases": detailed["cases"],
+                            "pairwise": detailed["pairwise"],
+                        }
+                    finally:
+                        eval_db.close()
+            else:
+                # 真实组始终复制到一次性派生库；只有 --real-models 才允许走云端。
+                with tempfile.TemporaryDirectory() as tmp:
+                    if args.real_models:
+                        eval_settings = replace(
+                            settings,
+                            database_path=Path(tmp) / "retrieval-real-api-eval.db",
+                            embedding_backend="api",
+                            retrieval_mode="hybrid",
+                            reranker_backend="api",
+                        )
+                        print(
+                            "注意：--real-models 会发送查询、标题、标题层级、标签、正文到已配置的 "
+                            "Embedding/Rerank API；Vault 只读，向量仅写临时派生库。",
+                            file=sys.stderr,
+                        )
+                    else:
+                        eval_settings = replace(
+                            settings,
+                            database_path=Path(tmp) / "retrieval-real-eval.db",
+                            embedding_backend="local_hash",
+                            retrieval_mode="hybrid",
+                            allow_cloud_embedding=False,
+                            allow_cloud_rerank=False,
+                        )
+                    eval_db = build_database(eval_settings)
+                    try:
+                        VaultSyncService(eval_db, eval_settings.vault_path).sync()
+                        available_paths = {
+                            str(row["rel_path"])
+                            for row in eval_db.fetchall(
+                                "SELECT rel_path FROM sources "
+                                "WHERE is_present=1 AND searchable=1"
+                            )
+                        }
+                        audit_retrieval_golden_groups(
+                            {group: goldens_doc["groups"][group]}, available_paths
+                        )
+                        routes = (
+                            build_private_api_evaluation_retrievers(eval_db, eval_settings)
+                            if args.real_models
+                            else build_private_local_evaluation_retrievers(
+                                eval_db, eval_settings
+                            )
+                        )
+                        detailed = eval_retrieval_detailed(
+                            routes, goldens_doc["groups"][group]
+                        )
+                        retrieval_report[group] = detailed["summary"]
+                        diagnostics_report[group] = {
+                            "cases": detailed["cases"],
+                            "pairwise": detailed["pairwise"],
+                        }
+                    finally:
+                        eval_db.close()
+        output = Path(args.output)
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "retrieval_metrics.json").write_text(
+            json.dumps(retrieval_report, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        (output / "retrieval_diagnostics.json").write_text(
+            json.dumps(diagnostics_report, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        if private_audit is not None:
+            (output / "retrieval_dataset_audit.json").write_text(
+                json.dumps(private_audit, ensure_ascii=False, indent=1), encoding="utf-8"
+            )
+        print(json.dumps(retrieval_report, ensure_ascii=False, indent=1))
+        return 0
+
     database = build_database(settings)
 
     if args.command in {"init", "sync"}:
@@ -77,7 +262,12 @@ def main(argv: list[str] | None = None) -> int:
         service = VaultSyncService(database, settings.vault_path)
         report = service.sync()
         retriever = build_retriever(database, settings)
-        filled = retriever.vector.ensure_vectors()
+        if retriever.vector.is_cloud:
+            print(
+                "注意：已显式允许云端 Embedding；将发送每条原子的标题、标题层级、标签、正文。",
+                file=sys.stderr,
+            )
+        filled = retriever.vector.ensure_vectors() if "vector" in retriever.routes else 0
         print(json.dumps({"sync": report, "vectors_filled": filled}, ensure_ascii=False, indent=1))
         return 0
 
@@ -123,8 +313,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "eval-agent":
-        import tempfile
-
         from .evaluation import run_comparative_eval
         from .importer import VaultSyncService
 
@@ -146,41 +334,6 @@ def main(argv: list[str] | None = None) -> int:
             summary = run_comparative_eval(eval_db, eval_retriever, cases, Path(args.output))
             eval_db.close()
         print(json.dumps(summary, ensure_ascii=False, indent=1))
-        return 0
-
-    if args.command == "eval-retrieval":
-        from .evaluation import eval_retrieval
-
-        goldens_doc = json.loads(
-            (Path(__file__).resolve().parents[2] / "evals" / "retrieval_goldens.json").read_text(encoding="utf-8")
-        )
-        # 真实 Vault 的 golden 组含私人笔记标题，不入公开仓库：本地可选文件存在时合并。
-        real_goldens_path = Path(__file__).resolve().parents[2] / "evals" / "retrieval_goldens.real.json"
-        if real_goldens_path.exists():
-            real_doc = json.loads(real_goldens_path.read_text(encoding="utf-8"))
-            goldens_doc["groups"].update(real_doc.get("groups", {}))
-        retriever = build_retriever(database, settings)
-        bm25_only = HybridRetriever(retriever.bm25, retriever.vector, routes=("bm25",))
-        vector_only = HybridRetriever(retriever.bm25, retriever.vector, routes=("vector",))
-        groups = args.group
-        retrieval_report: dict[str, object] = {}
-        wanted = ["synthetic", "real"] if groups == "all" else [groups]
-        for group in wanted:
-            if group not in goldens_doc["groups"]:
-                raise SystemExit(
-                    f"golden 组 {group!r} 不可用。真实组含私人笔记标题，不入公开仓库；"
-                    "如需评测，请在本地放置 evals/retrieval_goldens.real.json 后重试。"
-                )
-            retrieval_report[group] = eval_retrieval(
-                {"bm25": bm25_only, "vector": vector_only, "hybrid": retriever},
-                goldens_doc["groups"][group],
-            )
-        output = Path(args.output)
-        output.mkdir(parents=True, exist_ok=True)
-        (output / "retrieval_metrics.json").write_text(
-            json.dumps(retrieval_report, ensure_ascii=False, indent=1), encoding="utf-8"
-        )
-        print(json.dumps(retrieval_report, ensure_ascii=False, indent=1))
         return 0
 
     if args.command == "extract-snapshots":

@@ -62,10 +62,9 @@ uv run pytest tests/test_agent.py::test_prior_denial_is_respected -q
 ## 4. 评测与工程护栏（60 秒）
 
 ```powershell
-uv run pytest            # 48 项
+uv run pytest            # Embedding 缓存/RRF 重排/隐私/入口一致性
 uv run ruff check src tests
-uv run memory-garden eval-agent        # 三配置消融表：full_agent 12/12，
-                                       # without_feedback 恰好只挂 feedback_adherence
+uv run memory-garden eval-agent        # 三配置离线对照；结果仅保存在本机
 uv run memory-garden verify-vault      # vault_read_only: true, second_sync_idempotent: true
 ```
 
@@ -76,10 +75,12 @@ uv run memory-garden mcp
 # 或 Claude Desktop 配置 mcpServers: {"memory-garden": {"command": "uv", "args": ["run", "memory-garden", "mcp"]}}
 ```
 
-讲点：8 个工具与内部循环同一注册表；演示 `read_source` 拒绝未发现 id（边界即接口）。
+讲点：8个只读领域工具与内部循环同一注册表，另有完整回溯入口 `ask_garden`；
+演示 `read_source` 拒绝未发现 id（边界即接口）。
 
 ## 常见追问的现场证据
 
-- "数字哪来的？" → `artifacts/evals/agent_comparative/summary.json`、`artifacts/evals/retrieval/retrieval_metrics.json`
+- "怎么评测？" → `docs/RETRIEVAL_EVAL_PROTOCOL.md`、`evals/` 中的脱敏用例和评测代码；
+  生成结果与私有 golden 只保存在本机
 - "真实模型跑过吗？" → `agent_runs` 表：backend=openai_compatible、steps、latency、private_vault_sent
 - "测试覆盖什么？" → `tests/`：导入幂等/移动身份、短词召回、引用守卫、判定遵守、快照语义过滤、发现评分、MCP 注册、Web 全链路

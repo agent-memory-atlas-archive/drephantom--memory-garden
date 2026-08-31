@@ -3,13 +3,16 @@
 诚实边界（写进报告，不写进吹嘘）：
 - 对比评测使用离线确定性 ScriptedProvider，验证的是**协议约束力**（引用守卫、拒答、
   反例覆盖、判定遵守），不是真实模型的准确率；
-- 检索指标在人工标注 golden 集上计算 recall@k / MRR，区分 BM25 / 向量 / 混合三路，
+- 检索指标在人工标注 golden 集上计算 recall@k / MRR，区分 BM25 / 哈希向量 /
+  mock Embedding / RRF 混合 / RRF + 重排序，
   合成集与真实 Vault 分别标注，不混用。
 """
 from __future__ import annotations
 
 import json
+import math
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -358,34 +361,236 @@ def eval_discovery(
     return summary
 
 
-# ── 检索评测：golden 集 → recall@k / MRR，按路归因 ──────────────────────────
+# ── 检索评测：路径级 HitRate / Recall / Precision / MRR / nDCG ─────────────
+
+VERIFIED_GOLDEN_STATUSES = {"human_verified", "legacy_human_verified"}
+
+
+def audit_retrieval_golden_groups(
+    groups: dict[str, list[dict[str, Any]]],
+    available_paths: set[str] | None = None,
+) -> dict[str, Any]:
+    """Validate private split integrity without returning queries or source paths."""
+    seen_ids: set[str] = set()
+    query_to_id: dict[str, str] = {}
+    status_counts: Counter[str] = Counter()
+    category_counts: Counter[str] = Counter()
+    draft_case_ids: list[str] = []
+    missing_path_case_ids: set[str] = set()
+    split_paths: dict[str, set[str]] = {}
+    errors: list[str] = []
+
+    for group_name, cases in groups.items():
+        paths_in_group: set[str] = set()
+        for index, case in enumerate(cases, start=1):
+            case_id = str(case.get("id") or f"{group_name}_legacy_{index:03d}")
+            if case_id in seen_ids:
+                errors.append(f"duplicate case id {case_id}")
+            seen_ids.add(case_id)
+            query = str(case.get("query") or "").strip()
+            if not query:
+                errors.append(f"empty query in {case_id}")
+            elif query in query_to_id:
+                errors.append(f"duplicate query in {query_to_id[query]} and {case_id}")
+            else:
+                query_to_id[query] = case_id
+            raw_paths = case.get("relevant_paths")
+            if not isinstance(raw_paths, list) or not raw_paths:
+                errors.append(f"empty relevant_paths in {case_id}")
+                relevant_paths: list[str] = []
+            else:
+                relevant_paths = [str(path) for path in raw_paths if str(path)]
+                if len(relevant_paths) != len(raw_paths):
+                    errors.append(f"blank relevant_path in {case_id}")
+                if len(set(relevant_paths)) != len(relevant_paths):
+                    errors.append(f"duplicate relevant_path in {case_id}")
+            paths_in_group.update(relevant_paths)
+            if available_paths is not None and any(
+                path not in available_paths for path in relevant_paths
+            ):
+                missing_path_case_ids.add(case_id)
+            status = str(
+                case.get("annotation_status") or "unverified_legacy"
+            )
+            status_counts[status] += 1
+            if status not in VERIFIED_GOLDEN_STATUSES:
+                draft_case_ids.append(case_id)
+            category_counts[str(case.get("category") or "legacy_unspecified")] += 1
+        split_paths[group_name] = paths_in_group
+
+    dev_test_overlap = split_paths.get("real_dev", set()).intersection(
+        split_paths.get("real_test", set())
+    )
+    if dev_test_overlap:
+        errors.append(f"real_dev/real_test relevant path overlap count={len(dev_test_overlap)}")
+    if missing_path_case_ids:
+        errors.append(
+            "relevant paths unavailable for cases="
+            + ",".join(sorted(missing_path_case_ids))
+        )
+    if errors:
+        raise ValueError("retrieval golden audit failed: " + "; ".join(errors))
+    return {
+        "group_counts": {name: len(cases) for name, cases in groups.items()},
+        "total_cases": sum(len(cases) for cases in groups.values()),
+        "status_counts": dict(sorted(status_counts.items())),
+        "category_counts": dict(sorted(category_counts.items())),
+        "draft_case_count": len(draft_case_ids),
+        "draft_case_ids": draft_case_ids,
+        "dev_test_relevant_path_overlap": 0,
+        "private_text_included": False,
+    }
+
+
+def _unique_paths(paths: list[str]) -> list[str]:
+    """Atom 排名映射为 source path 排名，同一笔记只保留首次出现的位置。"""
+    return list(dict.fromkeys(path for path in paths if path))
+
+
+def _ndcg_at_k(paths: list[str], relevant: set[str], k: int) -> float:
+    dcg = sum(
+        1.0 / math.log2(rank + 1)
+        for rank, path in enumerate(paths[:k], start=1)
+        if path in relevant
+    )
+    ideal_hits = min(k, len(relevant))
+    idcg = sum(1.0 / math.log2(rank + 1) for rank in range(1, ideal_hits + 1))
+    return dcg / idcg if idcg else 0.0
+
+
+def _pairwise_counts(
+    cases: list[dict[str, Any]], baseline: str, challenger: str, metric: str
+) -> dict[str, int]:
+    counts = {"challenger_wins": 0, "ties": 0, "challenger_losses": 0}
+    for case in cases:
+        routes = case["routes"]
+        if baseline not in routes or challenger not in routes:
+            continue
+        baseline_value = float(routes[baseline][metric])
+        challenger_value = float(routes[challenger][metric])
+        if challenger_value > baseline_value:
+            counts["challenger_wins"] += 1
+        elif challenger_value < baseline_value:
+            counts["challenger_losses"] += 1
+        else:
+            counts["ties"] += 1
+    return counts
+
+
+def eval_retrieval_detailed(
+    retrievers: dict[str, Any],
+    goldens: list[dict[str, Any]],
+    k: int = 5,
+) -> dict[str, Any]:
+    """计算 source-path 级指标，并返回不含查询/路径/正文的逐例诊断。"""
+    if k < 1:
+        raise ValueError("k 必须大于 0")
+    metric_values: dict[str, dict[str, list[float]]] = {
+        name: {
+            "hit_rate": [],
+            "recall": [],
+            "precision": [],
+            "mrr": [],
+            "ndcg": [],
+        }
+        for name in retrievers
+    }
+    cases: list[dict[str, Any]] = []
+    # 一个 source 可切成多个 atom。先取足够深的 atom 排名，再按 path 去重，
+    # 避免 Top10 atom 只对应 2--4 篇笔记而伪装成 path-level Top5。
+    evaluation_depth = max(k, 30)
+    for case_index, golden in enumerate(goldens, start=1):
+        relevant = {
+            str(path) for path in golden.get("relevant_paths", []) if str(path)
+        }
+        if not relevant:
+            continue
+        case_report: dict[str, Any] = {
+            "case_id": str(golden.get("id") or f"case_{case_index:03d}"),
+            "relevant_total": len(relevant),
+            "routes": {},
+        }
+        for name, retriever in retrievers.items():
+            hits = retriever.search(
+                RetrievalQuery(text=str(golden["query"]), limit=evaluation_depth)
+            )
+            unique_paths = _unique_paths(
+                [str(hit.fields.get("path") or "") for hit in hits]
+            )
+            top_k = unique_paths[:k]
+            relevant_found = len(relevant.intersection(top_k))
+            found_positions = [
+                index
+                for index, path in enumerate(unique_paths, start=1)
+                if path in relevant
+            ]
+            hit_rate = 1.0 if relevant_found else 0.0
+            recall = relevant_found / len(relevant)
+            precision = relevant_found / k
+            reciprocal_rank = 1.0 / found_positions[0] if found_positions else 0.0
+            ndcg = _ndcg_at_k(unique_paths, relevant, k)
+            values = metric_values[name]
+            values["hit_rate"].append(hit_rate)
+            values["recall"].append(recall)
+            values["precision"].append(precision)
+            values["mrr"].append(reciprocal_rank)
+            values["ndcg"].append(ndcg)
+            case_report["routes"][name] = {
+                "first_relevant_rank": found_positions[0] if found_positions else None,
+                f"relevant_found@{k}": relevant_found,
+                f"unique_results@{k}": len(top_k),
+                "reciprocal_rank": round(reciprocal_rank, 6),
+                f"ndcg@{k}": round(ndcg, 6),
+            }
+        cases.append(case_report)
+
+    summary: dict[str, dict[str, float | int]] = {}
+    for name, values in metric_values.items():
+        case_count = len(values["recall"])
+
+        def mean(
+            metric: str,
+            current_values: dict[str, list[float]] = values,
+            current_count: int = case_count,
+        ) -> float:
+            return (
+                round(sum(current_values[metric]) / current_count, 4)
+                if current_count
+                else 0.0
+            )
+
+        summary[name] = {
+            f"hit_rate@{k}": mean("hit_rate"),
+            f"recall@{k}": mean("recall"),
+            f"precision@{k}": mean("precision"),
+            "mrr": mean("mrr"),
+            f"ndcg@{k}": mean("ndcg"),
+            "cases": case_count,
+            "evaluation_depth": evaluation_depth,
+        }
+
+    pairwise: dict[str, Any] = {}
+    for baseline, challenger in (
+        ("hybrid", "hybrid_rerank"),
+        ("hybrid", "hybrid_rerank_fused"),
+        ("hybrid_rerank", "hybrid_rerank_fused"),
+    ):
+        if baseline not in retrievers or challenger not in retrievers:
+            continue
+        label = f"{baseline}_vs_{challenger}"
+        pairwise[label] = {
+            "reciprocal_rank": _pairwise_counts(
+                cases, baseline, challenger, "reciprocal_rank"
+            ),
+            f"ndcg@{k}": _pairwise_counts(cases, baseline, challenger, f"ndcg@{k}"),
+        }
+    return {"summary": summary, "cases": cases, "pairwise": pairwise}
 
 
 def eval_retrieval(
     retrievers: dict[str, Any],
     goldens: list[dict[str, Any]],
     k: int = 5,
-) -> dict[str, dict[str, float]]:
-    report: dict[str, dict[str, float]] = {}
-    for name, retriever in retrievers.items():
-        recalls: list[float] = []
-        mrrs: list[float] = []
-        for golden in goldens:
-            hits = retriever.search(
-                RetrievalQuery(text=str(golden["query"]), limit=max(k, 10))
-            )
-            paths = [str(hit.fields.get("path") or "") for hit in hits]
-            relevant = set(golden["relevant_paths"])
-            if not relevant:
-                continue
-            found_positions = [
-                index + 1 for index, path in enumerate(paths[:k]) if path in relevant
-            ]
-            recalls.append(1.0 if found_positions else 0.0)
-            mrrs.append(1.0 / found_positions[0] if found_positions else 0.0)
-        report[name] = {
-            f"recall@{k}": round(sum(recalls) / len(recalls), 4) if recalls else 0.0,
-            "mrr": round(sum(mrrs) / len(mrrs), 4) if mrrs else 0.0,
-            "cases": len(recalls),
-        }
-    return report
+) -> dict[str, dict[str, float | int]]:
+    """向后兼容的摘要入口；详细诊断见 ``eval_retrieval_detailed``。"""
+    return eval_retrieval_detailed(retrievers, goldens, k)["summary"]

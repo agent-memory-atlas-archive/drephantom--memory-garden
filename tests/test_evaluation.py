@@ -8,7 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from memory_garden.config import Settings
-from memory_garden.evaluation import run_comparative_eval
+from memory_garden.evaluation import (
+    audit_retrieval_golden_groups,
+    eval_retrieval_detailed,
+    run_comparative_eval,
+)
+from memory_garden.retrieval import RetrievalHit
 from memory_garden.web import create_app
 
 
@@ -24,6 +29,84 @@ def test_comparative_eval_reproducible(settings, database, retriever, tmp_path: 
     assert full["feedback_adherence"] == 1.0
     assert baseline["feedback_adherence"] == 0.0  # 无判定记忆的基线必须失败
     assert (tmp_path / "results.json").exists()
+
+
+def test_retrieval_metrics_are_path_level_and_true_recall() -> None:
+    class FixedRetriever:
+        def search(self, _query):
+            return [
+                RetrievalHit(1, 1, 1.0, fields={"path": "a.md"}),
+                RetrievalHit(2, 1, 0.9, fields={"path": "a.md"}),
+                RetrievalHit(3, 2, 0.8, fields={"path": "c.md"}),
+                RetrievalHit(4, 3, 0.7, fields={"path": "b.md"}),
+            ]
+
+    detailed = eval_retrieval_detailed(
+        {"route": FixedRetriever()},
+        [
+            {"query": "q1", "relevant_paths": ["a.md", "b.md"]},
+            {"query": "q2", "relevant_paths": ["missing.md"]},
+        ],
+    )
+    metrics = detailed["summary"]["route"]
+    assert metrics["hit_rate@5"] == 0.5
+    assert metrics["recall@5"] == 0.5
+    assert metrics["precision@5"] == 0.2
+    assert metrics["mrr"] == 0.5
+    assert metrics["ndcg@5"] == 0.4599
+    assert detailed["cases"][0]["routes"]["route"]["first_relevant_rank"] == 1
+    serialized = json.dumps(detailed, ensure_ascii=False)
+    assert "q1" not in serialized and "a.md" not in serialized
+
+
+def test_private_golden_audit_tracks_drafts_and_rejects_split_leakage() -> None:
+    groups = {
+        "real_dev": [
+            {
+                "id": "dev_001",
+                "query": "开发查询",
+                "annotation_status": "human_verified",
+                "relevant_paths": ["dev.md"],
+            }
+        ],
+        "real_test": [
+            {
+                "id": "test_001",
+                "query": "测试查询",
+                "annotation_status": "assistant_draft_requires_owner_review",
+                "category": "semantic_paraphrase",
+                "relevant_paths": ["test.md"],
+            }
+        ],
+    }
+    audit = audit_retrieval_golden_groups(groups, {"dev.md", "test.md"})
+    assert audit["group_counts"] == {"real_dev": 1, "real_test": 1}
+    assert audit["draft_case_count"] == 1
+    assert audit["draft_case_ids"] == ["test_001"]
+    assert audit["dev_test_relevant_path_overlap"] == 0
+    assert audit["private_text_included"] is False
+
+    groups["real_test"][0]["relevant_paths"] = ["dev.md"]
+    with pytest.raises(ValueError, match="overlap count=1"):
+        audit_retrieval_golden_groups(groups, {"dev.md"})
+
+
+def test_private_golden_without_explicit_status_is_not_treated_as_verified() -> None:
+    audit = audit_retrieval_golden_groups(
+        {
+            "real_dev": [
+                {
+                    "id": "legacy_001",
+                    "query": "旧查询",
+                    "relevant_paths": ["legacy.md"],
+                }
+            ]
+        },
+        {"legacy.md"},
+    )
+    assert audit["status_counts"] == {"unverified_legacy": 1}
+    assert audit["draft_case_count"] == 1
+    assert audit["draft_case_ids"] == ["legacy_001"]
 
 
 def test_mcp_server_registers_all_tools(settings, database, retriever) -> None:
@@ -62,12 +145,40 @@ def test_web_full_loop(settings, database, retriever) -> None:
 
     settings_page = client.get("/settings")
     assert settings_page.status_code == 200 and "API Key" in settings_page.text
+    assert "明确允许云端 Embedding" in settings_page.text
+    assert "明确允许云端 cross-encoder Rerank" in settings_page.text
 
     saved = client.post(
         "/api/settings",
-        json={"assistant_name": "知微", "backend": "local"},
+        json={
+            "assistant_name": "知微",
+            "backend": "local",
+            "embedding_backend": "mock",
+            "embedding_provider": "siliconflow",
+            "embedding_base_url": "https://api.siliconflow.cn/v1",
+            "retrieval_mode": "embedding",
+            "reranker_backend": "local_heuristic",
+            "reranker_provider": "siliconflow",
+            "reranker_base_url": "https://api.siliconflow.cn/v1",
+            "reranker_model": "BAAI/bge-reranker-v2-m3",
+            "rerank_candidate_limit": 24,
+            "reranker_fusion": "rank_fusion",
+            "llm_embedding_model": "mock-semantic-v1",
+            "allow_cloud_embedding": False,
+            "allow_cloud_rerank": False,
+        },
     )
     assert saved.status_code == 200 and saved.json()["saved"] is True
+    runtime = json.loads((settings.database_path.parent / "settings.json").read_text(encoding="utf-8"))
+    assert runtime["embedding_backend"] == "mock"
+    assert runtime["embedding_provider"] == "siliconflow"
+    assert runtime["retrieval_mode"] == "embedding"
+    assert runtime["reranker_backend"] == "local_heuristic"
+    assert runtime["reranker_model"] == "BAAI/bge-reranker-v2-m3"
+    assert runtime["rerank_candidate_limit"] == 24
+    assert runtime["reranker_fusion"] == "rank_fusion"
+    assert runtime["allow_cloud_embedding"] is False
+    assert runtime["allow_cloud_rerank"] is False
 
     ask = client.post("/api/ask", json={"question": "自主判断这个主题有没有变化？"})
     assert ask.status_code == 200

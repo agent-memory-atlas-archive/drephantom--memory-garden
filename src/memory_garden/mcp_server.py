@@ -15,21 +15,17 @@ from mcp.server.mcpserver import MCPServer
 
 from .config import Settings
 from .db import Database
-from .retrieval import BM25Retriever, HybridRetriever, VectorRetriever
+from .retrieval import build_retriever
 from .tools import CognitiveTools
-
-
-def build_retriever(database: Database, settings: Settings) -> HybridRetriever:
-    embedding_client = None
-    vector = VectorRetriever(database, embedding_client)
-    return HybridRetriever(BM25Retriever(database), vector)
 
 
 def build_mcp_server(settings: Settings) -> MCPServer:
     database = Database(settings.database_path)
     database.initialize()
     retriever = build_retriever(database, settings)
-    retriever.vector.ensure_vectors()
+    # 云端向量不在 MCP 启动时批量构建；首次实际检索时按显式配置和缓存规则处理。
+    if "vector" in retriever.routes and not retriever.vector.is_cloud:
+        retriever.vector.ensure_vectors()
     # 单用户本地进程：一次会话内保持"已发现来源"状态，read_source 的
     # 最小必要访问约束在 MCP 场景同样生效
     tools = CognitiveTools(database, retriever)

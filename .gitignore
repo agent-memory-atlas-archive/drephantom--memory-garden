@@ -11,4 +11,6 @@ dist/
 
 # 本地私有评测与求职材料，不入库
 evals/retrieval_goldens.real.json
+evals/retrieval_goldens.real.sha256
+artifacts/evals/
 docs/RESUME.md

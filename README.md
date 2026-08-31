@@ -1,6 +1,6 @@
 # Memory Garden — 个人认知回溯 Agent
 
-> **English TL;DR:** A personal cognitive-retrospect Agent over long-term Obsidian notes. It discovers when your stated views actually changed, verifies claims against read-only sources with citable evidence, and refuses to invent causal stories — backed by 48 tests, three reproducible eval suites, and 8 read-only MCP tools. The Quick Start below runs offline on a bundled synthetic vault, no API key needed.
+> **English TL;DR:** A personal cognitive-retrospect Agent over long-term Obsidian notes. It discovers when your stated views actually changed, verifies claims against read-only sources with citable evidence, and refuses to invent causal stories. Automated tests and reproducible evaluation code are included; the Quick Start runs offline on a bundled synthetic vault with no API key.
 
 面向个人长期 Obsidian 记录的**认知回溯 Agent**：主动发现观点、判断与选择发生变化的候选，
 用受限的只读工具核对原始来源、追踪时间区间内的经历并检验支持与反例；
@@ -10,10 +10,10 @@
  Obsidian Vault（永远只读，哈希校验）
         │  只读同步：来源/修订链/事件时间与记录时间分离/作者归属
         ▼
- SQLite + FTS5(trigram) ──► 混合检索（BM25 + 字符n-gram向量 + RRF 融合）
+ SQLite + FTS5(trigram) ──► 可切换检索（BM25 / 字符哈希 / Embedding / RRF 混合）
         │                        │
         ▼                        ▼
- 立场快照管道（离线 LLM 抽取）   认知工具（8个只读，MCP 协议同源暴露）
+ 立场快照管道（离线 LLM 抽取）   认知工具（8个只读领域工具，MCP 同源暴露）
         │                        │
         ▼                        ▼
  发现引擎（变化分类学+显式对比句）◄── 单 Agent Harness（预算/引用守卫/结构化答案）
@@ -58,38 +58,18 @@ Memory Garden 把发现拆成离线/在线两层，让语义比较成为一等�
    每周只打扰 3–5 条；呈现两端**原话+日期并排**，让差距自己说话，不解释因果。
 5. **反应写回**：一键反应（属实/不是/无聊）直接写回该主题的排序权重——四周的个人校准优于任何通用规则。
 
-## 评测（全部产物可复现，`artifacts/evals/`）
+## 评测与验证（方法公开，运行结果不入库）
 
-**Agent 协议消融**（12 个合成对抗用例 × 3 配置，离线确定性 provider，`eval-agent`）：
+仓库公开评测代码、指标定义、脱敏合成用例和复现命令，但不提交生成的评测结果：
 
-| 配置 | 任务完成 | 引用有效 | 反例覆盖 | 拒答正确 | 判定遵守 | 无因果断言 | 通过率 |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| one_shot_baseline | 0.75 | 1.0 | — | 0.58 | 0.00 | 0.00 | 0.33 |
-| agent_without_feedback | 0.92 | 1.0 | 1.0 | 1.0 | **0.00** | 1.0 | 0.92 |
-| **full_agent** | **1.00** | 1.0 | 1.0 | 1.0 | **1.00** | 1.0 | **1.00** |
+- `pytest` 覆盖同步、检索、Embedding 缓存、隐私开关、工具调用、引用守卫、MCP 与 Web 接口；
+- `eval-agent` 使用隔离临时库和合成 Vault，比较单次回答、无判定记忆 Agent 与完整 Agent；
+- `eval-retrieval` 按 source path 计算 HitRate/Recall/Precision@5、MRR 与 nDCG@5，并保持各路线候选深度一致；
+- 公开 `mock` 仅用于验证Embedding接口、缓存和评测管线，不代表真实语义模型效果；
+- 私有 golden、真实 API 运行结果和逐条诊断仅保存在本机，`artifacts/evals/` 已加入 `.gitignore`。
 
-消融设计：`agent_without_feedback` 与 `full_agent` 唯一差异是是否加载用户判定记忆——
-恰好只有 `feedback_adherence` 一项翻转（0→1），证明反馈闭环是独立起作用的机制而非整体加成。
-
-**检索双路指标**（人工标注 golden 集，`eval-retrieval`）：
-
-| 语料 | BM25 recall@5 / MRR | 向量 | 混合 RRF |
-|---|---|---|---|
-| 合成对抗库（15 例） | 0.933 / 0.822 | 1.000 / 0.967 | **1.000 / 1.000** |
-| 私有真实库（14 例，仅发布聚合指标） | 0.929 / 0.893 | 1.000 / 0.964 | **1.000 / 0.929** |
-
-BM25 的 trigram 分词器无法命中 <3 字中文词（如"独处""边界"），
-字符 2/3-gram 哈希向量与 LIKE 兜底补齐了这部分召回——混合 > 单路，差距可归因。
-
-**发现精度**（合成库，`eval-discovery`，确定性抽取基线）：
-预期变化对查全 **1.0**；"措辞深化"对泄漏 **0**；判定口径查准 **0.8**
-（唯一的假阳性来自事件型记录，LLM 抽取的 has_stance 语义过滤可消除，确定性模式保留为诚实基线）。
-
-**真实模型烟测**：DeepSeek `deepseek-v4-flash` 完整工具循环（4 步 / 13 次只读调用 / 28.2s / 正常收敛），
-`private_vault_sent=false`；回答带可定位引用、区分端点、明确"近期候选需确认"。
-
-诚实边界：以上是工程与协议行为的度量，不证明真实用户长期受益率；
-发现质量的最终判据是"自用四周，标记'属实且有意思'的候选比例"。
+完整指标口径见 `docs/RETRIEVAL_EVAL_PROTOCOL.md`。这些验证只能证明工程链路和约束行为，
+不能证明真实用户的长期受益；后者需要持续自用和用户反馈验证。
 
 ## 她：知微
 
@@ -124,15 +104,74 @@ uv run memory-garden serve              # 本地 Web UI (127.0.0.1:8766)
 uv run pytest
 uv run ruff check src tests
 uv run mypy src/memory_garden
-uv run memory-garden eval-agent          # 协议消融评测（隔离临时库，离线可复现）
-uv run memory-garden eval-retrieval      # 检索双路指标
+uv run memory-garden eval-agent          # 隔离临时库，输出仅保存在本机
+uv run memory-garden eval-retrieval      # 脱敏合成用例，输出仅保存在本机
 uv run memory-garden eval-discovery      # 发现精度
 uv run memory-garden verify-vault        # Vault 只读 + 同步幂等校验
+# 明确配置并开启两个云端检索开关后：只打印聚合运行元数据
+uv run python scripts/run_private_api_rag_smoke.py --group real_dev --case-index 0 --source-limit 60
 ```
+
+## 检索与 Embedding 配置
+
+默认配置是 `MG_RETRIEVAL_MODE=hybrid`、`MG_EMBEDDING_BACKEND=local_hash`、
+`MG_RERANKER_BACKEND=local_heuristic`：SQLite FTS5 BM25 与 512 维字符 2/3-gram
+哈希向量先经 RRF 融合，再对最多 30 个候选做离线确定性重排，全程无需 API Key。
+CLI 可在子命令前临时选择：
+
+```powershell
+uv run memory-garden --retrieval-mode bm25 ask "自主判断"
+uv run memory-garden --retrieval-mode hash_vector ask "自主判断"
+uv run memory-garden --retrieval-mode embedding ask "自主判断"  # backend 必须是 mock/api
+uv run memory-garden --retrieval-mode hybrid ask "自主判断"
+uv run memory-garden --retrieval-mode hybrid --reranker none ask "自主判断"  # RRF 基线
+uv run memory-garden --embedding-backend api --retrieval-mode hybrid --reranker api ask "自主判断"
+```
+
+API Embedding 必须同时配置 `MG_EMBEDDING_BACKEND=api`、`MG_LLM_EMBEDDING_MODEL`、
+`MG_EMBEDDING_PROVIDER/BASE_URL/API_KEY(_FILE)`，并显式设置
+`MG_ALLOW_CLOUD_EMBEDDING=true`。它与 `MG_LLM_*` 生成连接相互独立，因此可同时使用
+DeepSeek 生成与 SiliconFlow 检索；未填写专用地址/密钥时仍兼容回退到旧的 `MG_LLM_*` 配置。
+启用后，系统会向 `/embeddings` 发送查询文本，以及每条检索原子的**标题、标题层级、标签、正文**；
+不会发送文件路径，原始 Vault 仍只读，向量仅写入派生 SQLite。Web 启动不自动批量发送云端向量，
+设置页提供带二次确认的“显式构建当前向量缓存”操作。`mock` 仅供 CI/测试。
+
+SiliconFlow 示例（密钥文件放仓库外；不要把 Key 本身写进 `.env`）：
+
+```dotenv
+MG_EMBEDDING_BACKEND=api
+MG_EMBEDDING_PROVIDER=siliconflow
+MG_EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+MG_EMBEDDING_API_KEY_FILE=D:/path/outside-repo/siliconflow.key
+MG_LLM_EMBEDDING_MODEL=BAAI/bge-m3
+MG_LLM_EMBEDDING_DIMENSION=1024
+MG_ALLOW_CLOUD_EMBEDDING=false
+
+MG_RERANKER_BACKEND=api
+MG_RERANKER_PROVIDER=siliconflow
+MG_RERANKER_BASE_URL=https://api.siliconflow.cn/v1
+MG_RERANKER_API_KEY_FILE=D:/path/outside-repo/siliconflow.key
+MG_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+MG_RERANKER_FUSION=rank_fusion
+MG_ALLOW_CLOUD_RERANK=false
+```
+
+两个允许开关故意保持 `false`；确认发送边界后再分别改为 `true`。
+
+`MG_RERANKER_BACKEND=api` 另需配置 `MG_RERANKER_PROVIDER/BASE_URL/API_KEY(_FILE)/MODEL`
+并显式设置 `MG_ALLOW_CLOUD_RERANK=true`。它会把查询与 RRF 候选的标题、标题层级、标签、
+正文发送到 `/rerank`；不开此开关时工厂直接拒绝构建。`MG_RERANKER_FUSION=replace` 使用
+cross-encoder 排名替换 RRF 排名，`rank_fusion` 则合并两种名次。默认 `local_heuristic` 仍是
+离线、可审计的第二阶段规则基线，不冒充神经 cross-encoder。
+
+完整链路为：查询 → BM25/Embedding 候选 → RRF → cross-encoder 重排（可选与 RRF 名次再融合）→ 证据注入 →
+模型生成与引用守卫。代码支持不等于真实模型效果；只有真实请求成功且评估命令产生指标后，
+才可描述为“使用真实模型完成评估”。
 
 ## MCP：同一套工具，两个世界
 
-`uv run memory-garden mcp` 以 stdio 启动 MCP Server，把 8 个认知工具暴露给任意 MCP 客户端
+`uv run memory-garden mcp` 以 stdio 启动 MCP Server，把8个只读领域工具与1个完整回溯入口
+`ask_garden` 暴露给任意 MCP 客户端
 （Claude Desktop 等）。工具边界（只读、"已发现来源"才能 read、发现工具的运行时收缩）
 与内部 Agent 循环完全同源——不是两套实现。
 
@@ -141,30 +180,34 @@ uv run memory-garden verify-vault        # Vault 只读 + 同步幂等校验
 ```
 src/memory_garden/
   config.py      设置加载（进程环境 > .env）
-  db.py          SQLite schema v2 + 增量迁移（来源/原子/快照/对话/判定/发现）
+  db.py          SQLite schema v3 + 无损增量迁移（Embedding 缓存身份/来源/认知数据）
   importer.py    只读同步：哈希修订链、移动身份稳定、event_time/recorded_at 分离、作者归属
-  retrieval.py   BM25(trigram) + 字符n-gram向量 + RRF 混合，离线确定性降级
-  llm.py         OpenAI 兼容客户端（工具循环/embeddings/重试/密钥脱敏）
+  retrieval.py   统一工厂：BM25 / 字符n-gram / mock或API Embedding / RRF 混合
+  llm.py         OpenAI 兼容客户端（工具循环/embeddings/rerank/重试/密钥脱敏）
   tools.py       8 个只读认知工具（含全库发现工具的运行时收缩）
   agent.py       Agent Harness：预算护栏/引用守卫/一次有界修复/本地确定性降级/结构化答案
   snapshots.py   立场快照管道 + 变化分类学 + 显式对比句 + 发现引擎（评分四因子）
   cognitive.py   发现扫描持久化、呈现追踪、一键反应、六选一判定记忆
-  evaluation.py  协议消融评测 / 检索双路指标 / 发现精度
+  evaluation.py  协议消融评测 / 检索与重排对照 / 发现精度
   mcp_server.py  MCP stdio 服务（工具与内部循环同源）
   web.py         极简本地 UI（FastAPI 单文件，无前端构建链）
   cli.py         init/sync/ask/discover/extract-snapshots/eval-*/serve/mcp/verify-vault
-tests/           48 项测试（导入/检索/工具/Agent/快照/评测/MCP/Web 全链路）
-evals/           合成对抗 Vault + 检索 golden 集（合成 15 例；真实集含私人标题，仅本地）+ 用例集
+tests/           自动化测试（含 Embedding 缓存、API cross-encoder、评估口径、数据集隔离与三入口统一）
+evals/           脱敏合成 Vault 与公开回归用例；私有 golden 不入库
 docs/            ARCHITECTURE.md / DEMO.md
+scripts/         显式授权的私有 API RAG 烟测（临时库，只打印聚合运行元数据）
 ```
 
 ## 已知边界（诚实清单）
 
 - 发现质量依赖"同一主题被反复带日期地记录"——写作越稀疏，沉默信号与对比信号越弱；
 - 主题实体归并目前是"词面 + LLM 沿用已知主题表"的轻量版，完整聚类与别名评测在 roadmap；
-- 混合检索的 MRR 在私有真实库上略低于单向量路（RRF 融合会稀释第一名），换召回不换排序是当前取舍；
+- 多路融合和第二阶段重排不保证优于最佳单路，必须在独立、人工复核的 golden 上分别比较；
+- 默认重排是可审计的规则基线；API cross-encoder 只是可选实现，不能仅凭链路跑通宣称效果提升；
 - 判定记忆的主题匹配用词交集（个人规模可行），不是向量语义匹配；
-- 云端模式会把问题与工具筛出的少量片段发给配置的 provider；Vault 本身永远只读且不出本机。
+- 对话云端模式会发送问题与工具筛出的少量片段；API Embedding 会发送查询和标题/标签/正文；
+  API Rerank 会发送查询和 RRF 候选的标题/标题层级/标签/正文。三者分别配置，两个检索云端开关默认关闭；Vault 文件
+  本身永远只读。
 
 ## 长期愿景（展望，不在当前路线图内）
 

@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # v1 → v2：discoveries 增加变化分类学/信号类型/呈现追踪列（存量库增量迁移）
 _V2_DISCOVERY_COLUMNS = {
@@ -78,9 +78,16 @@ CREATE VIRTUAL TABLE IF NOT EXISTS source_atoms_fts USING fts5(
 );
 
 CREATE TABLE IF NOT EXISTS atom_vectors (
-    atom_id INTEGER PRIMARY KEY REFERENCES source_atoms(id) ON DELETE CASCADE,
-    dim INTEGER NOT NULL,
-    vector_json TEXT NOT NULL
+    atom_id INTEGER NOT NULL REFERENCES source_atoms(id) ON DELETE CASCADE,
+    embedding_provider TEXT NOT NULL,
+    embedding_model TEXT NOT NULL,
+    embedding_dimension INTEGER NOT NULL,
+    embedding_text_version TEXT NOT NULL,
+    embedding_text_hash TEXT NOT NULL,
+    vector_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (atom_id, embedding_provider, embedding_model, embedding_text_version)
 );
 
 CREATE TABLE IF NOT EXISTS sync_runs (
@@ -247,6 +254,13 @@ class Database:
                 )
             if current < 2:
                 self._migrate_v1_to_v2(connection)
+            if current < 3:
+                self._migrate_v2_to_v3(connection)
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_atom_vectors_identity "
+                "ON atom_vectors(embedding_provider, embedding_model, "
+                "embedding_text_version, embedding_dimension)"
+            )
             connection.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -261,6 +275,54 @@ class Database:
         for column, definition in _V2_DISCOVERY_COLUMNS.items():
             if column not in existing:
                 connection.execute(f"ALTER TABLE discoveries ADD COLUMN {column} {definition}")
+
+    @staticmethod
+    def _migrate_v2_to_v3(connection: sqlite3.Connection) -> None:
+        """把单一 atom_id 缓存迁移为带完整 embedding 身份的可并存缓存。
+
+        v2 无法证明旧向量使用的 provider/model/文本版本，因此原样保留向量内容，
+        但标为 legacy；当前检索身份永远不会读取这些行，并会按需重建新缓存。
+        """
+        existing = {
+            str(info[1]) for info in connection.execute("PRAGMA table_info(atom_vectors)").fetchall()
+        }
+        if "embedding_provider" in existing:
+            return
+        now = utc_now()
+        connection.execute("DROP TABLE IF EXISTS atom_vectors_v3")
+        connection.execute(
+            """
+            CREATE TABLE atom_vectors_v3 (
+                atom_id INTEGER NOT NULL REFERENCES source_atoms(id) ON DELETE CASCADE,
+                embedding_provider TEXT NOT NULL,
+                embedding_model TEXT NOT NULL,
+                embedding_dimension INTEGER NOT NULL,
+                embedding_text_version TEXT NOT NULL,
+                embedding_text_hash TEXT NOT NULL,
+                vector_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (
+                    atom_id, embedding_provider, embedding_model, embedding_text_version
+                )
+            )
+            """
+        )
+        if {"atom_id", "dim", "vector_json"} <= existing:
+            connection.execute(
+                """
+                INSERT INTO atom_vectors_v3(
+                    atom_id, embedding_provider, embedding_model, embedding_dimension,
+                    embedding_text_version, embedding_text_hash, vector_json,
+                    created_at, updated_at
+                )
+                SELECT atom_id, 'legacy', 'unknown-v2', dim, 'legacy', '', vector_json, ?, ?
+                FROM atom_vectors
+                """,
+                (now, now),
+            )
+        connection.execute("DROP TABLE atom_vectors")
+        connection.execute("ALTER TABLE atom_vectors_v3 RENAME TO atom_vectors")
 
     def fetchone(self, sql: str, params: Sequence[object] = ()) -> sqlite3.Row | None:
         return self.connect().execute(sql, params).fetchone()

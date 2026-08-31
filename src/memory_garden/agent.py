@@ -101,6 +101,7 @@ class AgentRunResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     latency_ms: int = 0
+    private_vault_sent: bool = False
     thread_id: int | None = None
     message_id: int | None = None
 
@@ -136,6 +137,7 @@ class AgentHarness:
         provider: Provider | None = None,
     ) -> AgentRunResult:
         started = time.monotonic()
+        retrieval_private_before = self.retriever.private_payload_sent_count
         if allow_discovery is None:
             # 运行时范围收缩：主题已知 → 收走全库发现工具（不只是提示词建议）
             allow_discovery = not _has_explicit_topic(question)
@@ -155,6 +157,10 @@ class AgentHarness:
             finally:
                 self.provider = saved
         result.latency_ms = int((time.monotonic() - started) * 1000)
+        # 检索链可能在纯本地 Agent 路径中调用云端 Embedding/Rerank。
+        # 不能只看生成模型是否收到了 tool observation，否则会漏记整库向量构建。
+        if self.retriever.private_payload_sent_count > retrieval_private_before:
+            result.private_vault_sent = True
         self._persist(question, thread_id, result, allow_discovery)
         return result
 
@@ -271,6 +277,7 @@ class AgentHarness:
         stop_reason = ""
         error: str | None = None
         final_text = ""
+        private_vault_sent = False
         deadline = time.monotonic() + self.settings.agent_overall_timeout_seconds
 
         while steps < self.settings.agent_max_steps:
@@ -283,6 +290,10 @@ class AgentHarness:
                 self.provider.set_timeout(remaining)
             steps += 1
             try:
+                if isinstance(self.provider, OpenAIProvider) and any(
+                    message.get("role") == "tool" for message in messages
+                ):
+                    private_vault_sent = True
                 message = self.provider.complete(messages, tool_specs)
             except LLMError as exc:
                 error = str(exc)
@@ -330,6 +341,10 @@ class AgentHarness:
                                "结论先行，事实陈述附 [A{id}] 引用，证据不足就明说并最多提一个问题。",
                 })
                 try:
+                    if isinstance(self.provider, OpenAIProvider) and any(
+                        message.get("role") == "tool" for message in messages
+                    ):
+                        private_vault_sent = True
                     message = self.provider.complete(messages, [])
                     final_text = str(message.get("content") or "")
                     stop_reason = "tool_budget_exhausted_final"
@@ -348,11 +363,14 @@ class AgentHarness:
             fallback.tool_calls = tool_calls
             fallback.trace = trace + fallback.trace
             fallback.stop_reason = stop_reason + "+local_fallback"
+            fallback.private_vault_sent = private_vault_sent
             return fallback
 
         # 引用守卫：越界/伪引用 → 一次有界改写；仍失败 → 本地降级
         valid, refs = self._citations_valid(final_text, tools)
         if self.provider is not None and not valid:
+            if isinstance(self.provider, OpenAIProvider) and trace:
+                private_vault_sent = True
             repair = self._try_repair(messages, tools)
             if repair is not None:
                 final_text = repair
@@ -366,11 +384,14 @@ class AgentHarness:
             fallback.tool_calls = tool_calls
             fallback.trace = trace + fallback.trace
             fallback.stop_reason = (stop_reason or "final_answer") + "+citation_fallback"
+            fallback.private_vault_sent = private_vault_sent
             return fallback
 
         # 呈现层改写（仅真实 LLM）：草稿 → 她说话的语气。旧实现的 VOICE-002 教训：
         # 后台推理与前台表达由同一次输出承担时，报告体和过程独白必然漏出来。
         if isinstance(self.provider, OpenAIProvider):
+            if trace:
+                private_vault_sent = True
             remaining = deadline - time.monotonic()
             rewritten = self._rewrite_presentation(final_text, question, max(8.0, min(remaining, 45.0)))
             if rewritten:
@@ -400,6 +421,7 @@ class AgentHarness:
             stop_reason=stop_reason,
             error=error,
             trace=trace,
+            private_vault_sent=private_vault_sent,
         )
 
     # ── 引用校验与有界修复 ─────────────────────────────────────────────
@@ -659,7 +681,7 @@ class AgentHarness:
                     result.latency_ms,
                     result.stop_reason,
                     result.error,
-                    0,
+                    int(result.private_vault_sent),
                     json.dumps(result.trace, ensure_ascii=False)[:200000],
                     now,
                 ),
@@ -767,7 +789,7 @@ def _project_answer(
     if denied:
         answer_type = "no_clear_change"
     elif candidates:
-        # 词汇重叠度高（≥0.35，合成集上 0.417 vs 0.200 干净分离）→
+        # 词汇重叠度较高（当前确定性阈值为 0.35）时，更可能是观点延续。
         # 更可能是表达的深化/复述而非立场变化；本地确定性信号，语义判断仍归用户确认
         if float(candidates[0].get("lexical_overlap") or 0) >= 0.35:
             answer_type = "no_clear_change"

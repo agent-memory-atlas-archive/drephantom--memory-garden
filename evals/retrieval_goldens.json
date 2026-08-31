@@ -96,6 +96,29 @@
         "relevant_paths": [
           "延迟记录的经历.md"
         ]
+      },
+      {
+        "case_type": "same_intent_different_expression",
+        "query": "别急着追求一次完美，先交出可用成果再逐步打磨",
+        "relevant_paths": [
+          "完美主义-2024.md"
+        ]
+      },
+      {
+        "case_type": "lexically_similar_different_meaning",
+        "query": "避免消息打扰，独自安静一会儿让我重新充电",
+        "relevant_paths": [
+          "独处-2020.md",
+          "一个人-2024.md"
+        ]
+      },
+      {
+        "case_type": "unrelated_same_keywords",
+        "query": "在重要选择前先了解情况再行动",
+        "relevant_paths": [
+          "谨慎决策-2020.md",
+          "谨慎决策-2024.md"
+        ]
       }
     ]
   }
