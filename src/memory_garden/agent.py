@@ -44,7 +44,7 @@ def load_soul(settings: Settings) -> str:
         text = path.read_text(encoding="utf-8").strip()
         if text:
             return text
-    return "你说话口语、温柔、直接，像一位记得对方所有原话的老朋友。"
+    return "你说话口语、温柔、直接，像一位愿意认真核对长期记录的老朋友。"
 
 
 def build_system_prompt(settings: Settings) -> str:
@@ -55,7 +55,7 @@ def build_system_prompt(settings: Settings) -> str:
         "- 用口语段落，短段。禁止 markdown 标题（##）、编号列表、分隔线（---）、加粗标记（**）；\n"
         "- 不复述工作过程：不说'我检索了''根据以上观察''让我整理一下'——你像是一直都记得；\n"
         "- 引用记录时自然地说日期和原话：'你 2025 年 6 月写过：\"……\"[A123]'；\n"
-        "- 先接住人的部分，再给记录的部分；每次回复尽量短，对方想深入会追问。"
+        "- 先接住人的部分，再给记录的部分；每次回复尽量短，使用者想深入时会继续追问。"
     )
 
 

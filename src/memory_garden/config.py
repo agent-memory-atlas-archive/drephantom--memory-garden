@@ -88,7 +88,7 @@ class Settings:
     def load(cls, project_root: Path | None = None) -> Settings:
         root = project_root or Path(__file__).resolve().parents[2]
         # 优先级：进程环境 > 运行时设置（设置页写入） > .env 文件 > 默认值。
-        # 运行时设置只接受非空值，供 GitHub 用户免改文件完成配置。
+        # 运行时设置只接受非空值，使用者无需修改仓库文件即可完成配置。
         env: dict[str, str] = load_env_file(root / ".env")
         runtime_file = root / ".local" / "settings.json"
         if runtime_file.exists():

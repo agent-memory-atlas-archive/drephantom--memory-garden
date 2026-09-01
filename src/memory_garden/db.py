@@ -1,6 +1,6 @@
 """SQLite schema: read-only source provenance + derived cognition (runs, verdicts, discoveries).
 
-设计边界：Obsidian Vault 永远只读；本库只保存派生数据（索引、检索、轨迹、用户判定）。
+设计边界：Obsidian Vault 仅以只读方式访问；本库只保存派生数据（索引、检索、轨迹、用户判定）。
 """
 from __future__ import annotations
 

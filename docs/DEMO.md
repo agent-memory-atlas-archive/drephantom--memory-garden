@@ -7,11 +7,11 @@
 ```powershell
 cd memory-garden
 # 确保未配置 LLM（离线确定性模式）；.env 中 MG_ASSISTANT_BACKEND=local 或直接不配 key
-# 无真实 Vault 时设 MG_PUBLIC_DEMO_MODE=true，init 强制使用仓库内合成 Vault
+# 没有可用 Vault 时设置 MG_PUBLIC_DEMO_MODE=true，init 将强制使用仓库内合成 Vault
 uv run memory-garden init
 ```
 
-讲点：**Vault 只读**——同步前后全库哈希不变（verify-vault 会再证一次）。
+演示要点：**Vault 只读**——同步前后全库哈希不变（`verify-vault` 会再次验证）。
 
 ## 1. 认知回溯问答（90 秒）
 
@@ -25,7 +25,7 @@ uv run memory-garden ask "自主判断这个主题，我的想法以前到现在
 - 明确说"区间经历与变化只是时间相邻"；反例记录被并列给出；
 - 以"这条较近记录是否仍代表你现在的看法，还需要你确认"收尾。
 
-对照组（讲"知道什么时候闭嘴"）：
+对照组（演示“证据不足时停止推断”）：
 
 ```powershell
 uv run memory-garden ask "火星殖民"
@@ -40,7 +40,7 @@ uv run memory-garden discover --limit 3
 
 预期要点：候选呈现为**两端原话+日期并排**（"让差距自己说话"）；
 问题措辞是"表达更具体了，还是想法真的变了？"——不给因果解释。
-（配了 key 时先跑 `uv run memory-garden extract-snapshots`，候选由 LLM 立场快照驱动，
+（配置 API Key 后可先运行 `uv run memory-garden extract-snapshots`，候选由 LLM 立场快照驱动，
 并演示"书摘/AI 草稿被 has_stance 过滤"。）
 
 一键反应写回：
@@ -55,7 +55,7 @@ uv run memory-garden review <id> accurate
 uv run memory-garden ask "自主判断"
 # 记下 message_id（输出末尾元信息行）
 uv run memory-garden review 是上一轮的候选……
-# 或直接跑 e2e 测试证明"否认 → 再问 → 遵守修正"：
+# 或直接运行端到端测试，验证“否认 → 再问 → 遵守判定”：
 uv run pytest tests/test_agent.py::test_prior_denial_is_respected -q
 ```
 
@@ -75,12 +75,13 @@ uv run memory-garden mcp
 # 或 Claude Desktop 配置 mcpServers: {"memory-garden": {"command": "uv", "args": ["run", "memory-garden", "mcp"]}}
 ```
 
-讲点：8个只读领域工具与内部循环同一注册表，另有完整回溯入口 `ask_garden`；
+演示要点：8 个只读领域工具与内部循环使用同一注册表，另有完整回溯入口 `ask_garden`；
 演示 `read_source` 拒绝未发现 id（边界即接口）。
 
 ## 常见追问的现场证据
 
 - "怎么评测？" → `docs/RETRIEVAL_EVAL_PROTOCOL.md`、`evals/` 中的脱敏用例和评测代码；
   生成结果与私有 golden 只保存在本机
-- "真实模型跑过吗？" → `agent_runs` 表：backend=openai_compatible、steps、latency、private_vault_sent
+- "如何验证真实模型链路？" → 在明确授权云端发送后运行私有 smoke，并在本地 `agent_runs` 表核对
+  `backend`、`steps`、`latency` 与 `private_vault_sent`；公开仓库不附带真实模型运行结果
 - "测试覆盖什么？" → `tests/`：导入幂等/移动身份、短词召回、引用守卫、判定遵守、快照语义过滤、发现评分、MCP 注册、Web 全链路

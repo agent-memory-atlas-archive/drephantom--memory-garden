@@ -164,8 +164,8 @@ SETTINGS_HTML = """<!doctype html>
  <div class="hint">此按钮使用进程当前已加载的配置；保存设置后请先重启，再执行构建。</div>
 
  <h2>数据</h2>
- <label>Vault 路径（你的 Obsidian 笔记夹，只读）</label>
- <input id="vault" placeholder="D:/path/to/你的 Vault">
+ <label>Obsidian Vault 路径（只读）</label>
+ <input id="vault" placeholder="D:/path/to/Obsidian Vault">
  <div class="hint">密钥保存在本机 .local/settings.json（已被 .gitignore 排除，不会进仓库）。
   保存后需要重启生效：双击 stop-memory-garden.bat，再双击 start-memory-garden.bat。</div>
  <button onclick="save()">保存</button><span class="saved" id="msg"></span>
