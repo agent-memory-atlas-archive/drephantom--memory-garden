@@ -52,6 +52,48 @@ class OpenAICompatibleClient:
             else embedding_dimension
         )
         self._http_client: httpx.Client | None = None
+        # 仅保存聚合计数，不保存 prompt、响应正文或密钥。Agent/评测可用快照差值
+        # 记录真实 token 与网络开销，而不会把私人内容复制进额外日志。
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        self.total_requests = 0
+        self.total_network_latency_ms = 0
+
+    def usage_snapshot(self) -> tuple[int, int, int, int]:
+        return (
+            self.total_prompt_tokens,
+            self.total_completion_tokens,
+            self.total_requests,
+            self.total_network_latency_ms,
+        )
+
+    def usage_since(self, before: tuple[int, int, int, int]) -> dict[str, int]:
+        after = self.usage_snapshot()
+        return {
+            "prompt_tokens": max(0, after[0] - before[0]),
+            "completion_tokens": max(0, after[1] - before[1]),
+            "requests": max(0, after[2] - before[2]),
+            "network_latency_ms": max(0, after[3] - before[3]),
+        }
+
+    def _record_chat_usage(self, payload: dict[str, Any], elapsed_ms: int) -> None:
+        usage = payload.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
+
+        def non_negative_int(*names: str) -> int:
+            for name in names:
+                try:
+                    return max(0, int(usage.get(name) or 0))
+                except (TypeError, ValueError):
+                    continue
+            return 0
+
+        self.total_prompt_tokens += non_negative_int("prompt_tokens", "input_tokens")
+        self.total_completion_tokens += non_negative_int(
+            "completion_tokens", "output_tokens"
+        )
+        self.total_network_latency_ms += max(0, elapsed_ms)
 
     def _network_client(self) -> httpx.Client:
         if self._http_client is None:
@@ -127,9 +169,11 @@ class OpenAICompatibleClient:
         if self.settings.llm_reasoning_effort and "reasoning_effort" not in body:
             body = {**body, "reasoning_effort": self.settings.llm_reasoning_effort}
         last_error: Exception | None = None
+        started = time.monotonic()
         for attempt in range(self.settings.llm_max_retries + 1):
             try:
                 with httpx.Client(timeout=timeout) as client:
+                    self.total_requests += 1
                     response = client.post(
                         self._url("chat/completions"), headers=self._headers(), json=body
                     )
@@ -139,7 +183,13 @@ class OpenAICompatibleClient:
                             response=response,
                         )
                     response.raise_for_status()
-                    return response.json()
+                    payload = response.json()
+                    if not isinstance(payload, dict):
+                        raise ValueError("响应顶层必须是对象")
+                    self._record_chat_usage(
+                        payload, int((time.monotonic() - started) * 1000)
+                    )
+                    return payload
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code not in _RETRYABLE_STATUS:
                     detail = exc.response.text[:600]
@@ -149,6 +199,8 @@ class OpenAICompatibleClient:
                 last_error = exc
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_error = exc
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise LLMError("模型响应不是有效 JSON 对象") from exc
             time.sleep(0.5 * (2**attempt))
         raise LLMError(redact(f"模型调用失败：{last_error}", self.api_key))
 

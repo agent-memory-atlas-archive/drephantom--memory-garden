@@ -65,7 +65,7 @@ Memory Garden 把发现拆成离线/在线两层，让语义比较成为一等�
 评测产物仅在本地保存，不进入公开仓库：
 
 - `pytest` 覆盖同步、检索、Embedding 缓存、隐私开关、工具调用、引用守卫、MCP 与 Web 接口；
-- `eval-agent` 使用隔离临时库和合成 Vault，比较单次回答、无判定记忆 Agent 与完整 Agent；
+- `eval-agent` 使用隔离临时库和 12 个脱敏合成用例，对比单次回答、无判定记忆 Agent 与完整 Agent 3 种配置；
 - `eval-retrieval` 按 source path 计算 HitRate/Recall/Precision@5、MRR 与 nDCG@5，并保持各路线候选深度一致；
 - 公开 `mock` 仅用于验证 Embedding 接口、缓存和评测管线，不代表真实语义模型效果。
 
@@ -132,7 +132,8 @@ uv run memory-garden --embedding-backend api --retrieval-mode hybrid --reranker 
 API Embedding 必须同时配置 `MG_EMBEDDING_BACKEND=api`、`MG_LLM_EMBEDDING_MODEL`、
 `MG_EMBEDDING_PROVIDER/BASE_URL/API_KEY(_FILE)`，并显式设置
 `MG_ALLOW_CLOUD_EMBEDDING=true`。它与 `MG_LLM_*` 生成连接相互独立，因此可同时使用
-DeepSeek 生成与 SiliconFlow 检索；未填写专用地址/密钥时仍兼容回退到旧的 `MG_LLM_*` 配置。
+DeepSeek 生成与 SiliconFlow 检索。三条云端连接采用 fail-closed：Embedding 或 Rerank 的专用
+Base URL/Key 缺失时直接拒绝，绝不回退到生成模型连接，避免把私人笔记误发到错误 provider。
 启用后，系统会向 `/embeddings` 发送查询文本，以及每条检索原子的**标题、标题层级、标签、正文**；
 不会发送文件路径，原始 Vault 仍只读，向量仅写入派生 SQLite。Web 启动不自动批量发送云端向量，
 设置页提供带二次确认的“显式构建当前向量缓存”操作。`mock` 仅供 CI/测试。
@@ -186,7 +187,7 @@ src/memory_garden/
   retrieval.py   统一工厂：BM25 / 字符n-gram / mock或API Embedding / RRF 混合
   llm.py         OpenAI 兼容客户端（工具循环/embeddings/rerank/重试/密钥脱敏）
   tools.py       8 个只读认知工具（含全库发现工具的运行时收缩）
-  agent.py       Agent Harness：预算护栏/引用守卫/一次有界修复/本地确定性降级/结构化答案
+  agent.py       Agent Harness：预算/证据计划/引用守卫/本地确定性降级/结构化答案
   snapshots.py   立场快照管道 + 变化分类学 + 显式对比句 + 发现引擎（评分四因子）
   cognitive.py   发现扫描持久化、呈现追踪、一键反应、六选一判定记忆
   evaluation.py  协议消融评测 / 检索与重排对照 / 发现精度
@@ -196,7 +197,7 @@ src/memory_garden/
 tests/           自动化测试（含 Embedding 缓存、API cross-encoder、评估口径、数据集隔离与三入口统一）
 evals/           脱敏合成 Vault 与公开回归用例；私有 golden 不入库
 docs/            ARCHITECTURE.md / DEMO.md
-scripts/         显式授权的私有 API RAG 烟测（临时库，只打印聚合运行元数据）
+scripts/         显式授权的私有 API 烟测（临时库，只输出聚合运行元数据）
 ```
 
 ## 已知边界（诚实清单）

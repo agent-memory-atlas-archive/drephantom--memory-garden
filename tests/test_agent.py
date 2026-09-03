@@ -94,18 +94,43 @@ def test_cloud_tool_observation_is_recorded_as_private_vault_sent(
     settings, database, retriever
 ) -> None:
     class FakeCloudClient:
+        def __init__(self) -> None:
+            self.cursor = 0
+
         def chat_with_tools(self, messages, tools, timeout_seconds=None):
             tool_messages = [message for message in messages if message.get("role") == "tool"]
-            if tools and not tool_messages:
+            calls = [
+                ("search_sources", '{"query":"自主判断","limit":8}'),
+                ("get_topic_timeline", '{"topic":"自主判断"}'),
+                ("find_change_candidates", '{"topic":"自主判断","limit":1}'),
+                (
+                    "find_interval_events",
+                    '{"topic":"自主判断","date_from":"2010-01-01",'
+                    '"date_to":"2030-01-01"}',
+                ),
+                (
+                    "search_hypothesis_evidence",
+                    '{"hypothesis":"变化与区间经历有关","query":"自主判断",'
+                    '"stance":"support"}',
+                ),
+                (
+                    "search_hypothesis_evidence",
+                    '{"hypothesis":"变化与区间经历有关","query":"自主判断",'
+                    '"stance":"challenge"}',
+                ),
+            ]
+            if tools and self.cursor < len(calls):
+                name, arguments = calls[self.cursor]
+                self.cursor += 1
                 return {
                     "content": "",
                     "tool_calls": [
                         {
-                            "id": "call-search",
+                            "id": f"call-{self.cursor}",
                             "type": "function",
                             "function": {
-                                "name": "search_sources",
-                                "arguments": '{"query":"自主判断","limit":3}',
+                                "name": name,
+                                "arguments": arguments,
                             },
                         }
                     ],
@@ -127,10 +152,34 @@ def test_cloud_tool_observation_is_recorded_as_private_vault_sent(
     provider = OpenAIProvider(FakeCloudClient())  # type: ignore[arg-type]
     result = AgentHarness(database, retriever, cloud_settings, provider=provider).run("自主判断")
     assert result.private_vault_sent is True
+    # 呈现改写删除了草稿引用时必须被拒绝；最终输出仍保留通过守卫的引用。
+    assert re.search(r"\[A\d+\]", result.reply)
+    assert any(
+        event.get("tool") == "presentation_rewrite_rejected"
+        for event in result.trace
+    )
     row = database.fetchone(
         "SELECT private_vault_sent FROM agent_runs WHERE message_id=?", (result.message_id,)
     )
     assert row is not None and int(row["private_vault_sent"]) == 1
+
+
+def test_provider_final_is_rejected_until_evidence_plan_is_complete(
+    settings, database, retriever
+) -> None:
+    """模型读完时间线就抢答时，Harness 要求补齐端点、区间与正反证据。"""
+    standard = standard_trace_script("自主判断", "这一变化与区间内的经历有关")
+    provider = ScriptedProvider(
+        standard[:2]
+        + [{"final": "我已经可以直接作答。"}]
+        + standard[2:]
+    )
+    result = AgentHarness(database, retriever, settings, provider=provider).run("自主判断")
+    assert result.answer.answer_type == "traced_change"
+    assert any(event.get("tool") == "evidence_plan_guard" for event in result.trace)
+    assert not any(
+        event.get("tool") == "evidence_plan_guard_failed" for event in result.trace
+    )
 
 
 def test_cloud_embedding_upload_is_recorded_as_private_vault_sent(
@@ -181,3 +230,18 @@ def test_fake_citation_never_reaches_user(settings, database, retriever) -> None
     result = harness.run("自主判断")
     assert result.backend in {"scripted", "local_fallback"}
     assert "A77777" not in result.reply
+
+
+def test_reused_refs_remain_attributed_to_each_tool(settings, database, retriever) -> None:
+    """同一 atom 被正反证据工具重复返回时，trace 仍保留完整引用集合。"""
+    provider = ScriptedProvider(
+        standard_trace_script("自主判断", "这一变化与区间内的经历有关")
+    )
+    result = AgentHarness(database, retriever, settings, provider=provider).run("自主判断")
+    evidence_events = [
+        event for event in result.trace
+        if event.get("tool") == "search_hypothesis_evidence"
+    ]
+    assert len(evidence_events) == 2
+    assert all(event.get("refs") for event in evidence_events)
+    assert "new_refs" in evidence_events[1]

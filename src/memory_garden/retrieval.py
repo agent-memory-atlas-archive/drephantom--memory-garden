@@ -762,8 +762,8 @@ def build_embedding_backend(settings: Settings, backend_name: str | None = None)
             "API Embedding 已被隐私边界阻止；只有显式设置 "
             "MG_ALLOW_CLOUD_EMBEDDING=true 后才允许发送标题、标题层级、标签、正文和查询文本"
         )
-    base_url = settings.embedding_base_url or settings.llm_base_url
-    api_key = settings.embedding_api_key or settings.llm_api_key
+    base_url = settings.embedding_base_url
+    api_key = settings.embedding_api_key
     missing = []
     if not base_url:
         missing.append("MG_EMBEDDING_BASE_URL")
@@ -812,8 +812,8 @@ def build_reranker(
             "API Rerank 已被隐私边界阻止；只有显式设置 "
             "MG_ALLOW_CLOUD_RERANK=true 后才允许发送查询和 RRF 候选文本"
         )
-    base_url = settings.reranker_base_url or settings.embedding_base_url or settings.llm_base_url
-    api_key = settings.reranker_api_key or settings.embedding_api_key or settings.llm_api_key
+    base_url = settings.reranker_base_url
+    api_key = settings.reranker_api_key
     missing = []
     if not base_url:
         missing.append("MG_RERANKER_BASE_URL")

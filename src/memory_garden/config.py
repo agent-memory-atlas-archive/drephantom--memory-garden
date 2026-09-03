@@ -130,18 +130,17 @@ class Settings:
         env.update(os.environ)
         key = _secret_from_env(env, "MG_LLM_API_KEY", "MG_LLM_API_KEY_FILE")
         embedding_key = _secret_from_env(
-            env, "MG_EMBEDDING_API_KEY", "MG_EMBEDDING_API_KEY_FILE", fallback=key
+            env, "MG_EMBEDDING_API_KEY", "MG_EMBEDDING_API_KEY_FILE"
         )
         reranker_key = _secret_from_env(
             env,
             "MG_RERANKER_API_KEY",
             "MG_RERANKER_API_KEY_FILE",
-            fallback=embedding_key,
         )
-        embedding_base_url = env.get("MG_EMBEDDING_BASE_URL", "") or env.get(
-            "MG_LLM_BASE_URL", ""
-        )
-        reranker_base_url = env.get("MG_RERANKER_BASE_URL", "") or embedding_base_url
+        # 三条云端链路 fail closed：不能因为专用配置遗漏而把私有笔记
+        # 意外发送到生成模型 provider（历史上曾因此请求了错误的 /embeddings）。
+        embedding_base_url = env.get("MG_EMBEDDING_BASE_URL", "")
+        reranker_base_url = env.get("MG_RERANKER_BASE_URL", "")
         settings = cls(
             vault_path=Path(env.get("MG_VAULT_PATH", str(root / "evals" / "cognitive_mvp_vault"))),
             database_path=Path(env.get("MG_DATABASE_PATH", str(root / ".local" / "memory_garden.db"))),

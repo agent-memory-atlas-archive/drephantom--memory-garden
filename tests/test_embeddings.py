@@ -101,6 +101,8 @@ def test_web_api_backend_does_not_upload_during_startup(
         allow_cloud_embedding=True,
         llm_base_url="https://example.invalid/v1",
         llm_api_key="startup-secret",
+        embedding_base_url="https://example.invalid/v1",
+        embedding_api_key="startup-embedding-secret",
         llm_embedding_model="embed-model",
         reranker_backend="api",
         reranker_base_url="https://example.invalid/v1",
@@ -185,6 +187,87 @@ def test_api_provider_request_format_and_dimension_validation(
     api_settings.llm_embedding_dimension = 4
     with pytest.raises(LLMError, match="返回维度 3"):
         OpenAICompatibleClient(api_settings).embed(["甲", "乙"])
+
+
+def test_chat_usage_snapshot_records_only_aggregate_counts(
+    settings: Settings, monkeypatch
+) -> None:
+    class Response:
+        status_code = 200
+        text = ""
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {
+                "choices": [{"message": {"content": "合成回答"}}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 7},
+            }
+
+    class Client:
+        def __init__(self, **_kwargs: Any):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def post(self, *_args: Any, **_kwargs: Any):
+            return Response()
+
+    monkeypatch.setattr("memory_garden.llm.httpx.Client", Client)
+    api_settings = Settings(
+        vault_path=settings.vault_path,
+        database_path=settings.database_path,
+        llm_base_url="https://chat.example/v1",
+        llm_api_key="aggregate-only-secret",
+        llm_chat_model="chat-v1",
+    )
+    client = OpenAICompatibleClient(api_settings)
+    before = client.usage_snapshot()
+    client.chat({"model": "chat-v1", "messages": [{"role": "user", "content": "私密"}]})
+    assert client.usage_since(before) == {
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "requests": 1,
+        "network_latency_ms": client.total_network_latency_ms,
+    }
+    assert "aggregate-only-secret" not in repr(client.usage_snapshot())
+
+
+def test_cloud_retrieval_connections_fail_closed_without_dedicated_config(
+    settings: Settings, database
+) -> None:
+    embedding = Settings(
+        vault_path=settings.vault_path,
+        database_path=settings.database_path,
+        llm_base_url="https://chat.example/v1",
+        llm_api_key="chat-only-secret",
+        llm_chat_model="chat-model",
+        llm_embedding_model="embed-model",
+        embedding_backend="api",
+        allow_cloud_embedding=True,
+    )
+    with pytest.raises(ValueError, match="MG_EMBEDDING_BASE_URL"):
+        build_embedding_backend(embedding)
+
+    rerank = Settings(
+        vault_path=settings.vault_path,
+        database_path=settings.database_path,
+        llm_base_url="https://chat.example/v1",
+        llm_api_key="chat-only-secret",
+        llm_chat_model="chat-model",
+        reranker_backend="api",
+        reranker_model="rerank-model",
+        allow_cloud_rerank=True,
+    )
+    with pytest.raises(ValueError, match="MG_RERANKER_BASE_URL"):
+        build_reranker(database, rerank)
+    assert "chat-only-secret" not in repr(embedding)
+    assert "chat-only-secret" not in repr(rerank)
 
 
 def test_embedding_retries_transient_network_error(settings: Settings, monkeypatch) -> None:

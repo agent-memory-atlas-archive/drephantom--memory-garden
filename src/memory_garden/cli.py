@@ -254,6 +254,65 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(retrieval_report, ensure_ascii=False, indent=1))
         return 0
 
+    if args.command == "eval-agent":
+        from .evaluation import run_comparative_eval
+        from .importer import VaultSyncService
+
+        # 协议评测必须与开发库隔离：一次性临时库 + 强制合成 Vault。
+        # 此分支必须位于 build_database(settings) 之前，避免无意义地创建用户数据库。
+        repo_root = Path(__file__).resolve().parents[2]
+        cases = json.loads(
+            (repo_root / "evals" / "agent_cases.json").read_text(encoding="utf-8")
+        )["cases"]
+        with tempfile.TemporaryDirectory() as tmp:
+            eval_settings = Settings(
+                vault_path=repo_root / "evals" / "cognitive_mvp_vault",
+                database_path=Path(tmp) / "eval.db",
+                llm_chat_model="",
+            )
+            eval_db = Database(eval_settings.database_path)
+            eval_db.initialize()
+            try:
+                VaultSyncService(eval_db, eval_settings.vault_path).sync()
+                eval_retriever = build_retriever(eval_db, eval_settings)
+                eval_retriever.vector.ensure_vectors()
+                summary = run_comparative_eval(
+                    eval_db, eval_retriever, cases, Path(args.output)
+                )
+            finally:
+                eval_db.close()
+        print(json.dumps(summary, ensure_ascii=False, indent=1))
+        return 0
+
+    if args.command == "eval-discovery":
+        from .evaluation import eval_discovery
+        from .importer import VaultSyncService
+
+        # 发现评测始终使用公开合成库和一次性派生库；不读取或写入用户配置数据库。
+        repo_root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as tmp:
+            eval_settings = Settings(
+                vault_path=repo_root / "evals" / "cognitive_mvp_vault",
+                database_path=Path(tmp) / "discovery-eval.db",
+                llm_chat_model="",
+            )
+            eval_db = Database(eval_settings.database_path)
+            eval_db.initialize()
+            try:
+                VaultSyncService(eval_db, eval_settings.vault_path).sync()
+                eval_retriever = build_retriever(eval_db, eval_settings)
+                summary = eval_discovery(eval_db, eval_retriever, Path(args.output))
+            finally:
+                eval_db.close()
+        print(
+            json.dumps(
+                {key: value for key, value in summary.items() if key != "candidates"},
+                ensure_ascii=False,
+                indent=1,
+            )
+        )
+        return 0
+
     database = build_database(settings)
 
     if args.command in {"init", "sync"}:
@@ -312,30 +371,6 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(outcome, ensure_ascii=False))
         return 0
 
-    if args.command == "eval-agent":
-        from .evaluation import run_comparative_eval
-        from .importer import VaultSyncService
-
-        # 协议评测必须与开发库隔离：一次性临时库 + 强制合成 Vault
-        cases = json.loads(
-            (Path(__file__).resolve().parents[2] / "evals" / "agent_cases.json").read_text(encoding="utf-8")
-        )["cases"]
-        with tempfile.TemporaryDirectory() as tmp:
-            eval_settings = Settings(
-                vault_path=Path(__file__).resolve().parents[2] / "evals" / "cognitive_mvp_vault",
-                database_path=Path(tmp) / "eval.db",
-                llm_chat_model="",
-            )
-            eval_db = Database(eval_settings.database_path)
-            eval_db.initialize()
-            VaultSyncService(eval_db, eval_settings.vault_path).sync()
-            eval_retriever = build_retriever(eval_db, eval_settings)
-            eval_retriever.vector.ensure_vectors()
-            summary = run_comparative_eval(eval_db, eval_retriever, cases, Path(args.output))
-            eval_db.close()
-        print(json.dumps(summary, ensure_ascii=False, indent=1))
-        return 0
-
     if args.command == "extract-snapshots":
         from .llm import OpenAICompatibleClient
         from .snapshots import DeterministicExtractor, LLMBatchExtractor, ensure_snapshots
@@ -363,17 +398,6 @@ def main(argv: list[str] | None = None) -> int:
             "extractor": chosen_extractor.name,
             "topics": {row["topic"]: row["n"] for row in topics},
         }, ensure_ascii=False, indent=1))
-        return 0
-
-    if args.command == "eval-discovery":
-        from .evaluation import eval_discovery
-
-        retriever = build_retriever(database, settings)
-        summary = eval_discovery(database, retriever, Path(args.output))
-        print(json.dumps(
-            {k: v for k, v in summary.items() if k != "candidates"},
-            ensure_ascii=False, indent=1,
-        ))
         return 0
 
     if args.command == "serve":

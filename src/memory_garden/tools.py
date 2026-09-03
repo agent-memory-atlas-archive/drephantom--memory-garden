@@ -402,12 +402,26 @@ class CognitiveTools:
         if stance not in {"support", "challenge"}:
             stance = "support"
         hypothesis = str(args.get("hypothesis") or "")
+        base_query = str(args.get("query") or hypothesis)
+        # stance 不能只是一个写进返回 JSON、却完全不影响检索的装饰字段。
+        # challenge 路线加入反例词并以显式反例标签/转折表达作确定性重排；它仍只产生
+        # “待核对的挑战候选”，不把词面信号冒充为真正反证。
+        query_text = base_query
+        if stance == "challenge":
+            query_text = f"{base_query} 反例 例外 仍会 但是 不等于"
         query = RetrievalQuery(
-            text=str(args.get("query") or hypothesis),
+            text=query_text,
             authorship=None,  # 反例可能藏在引用/草稿里，本工具不限作者归属
-            limit=min(int(args.get("limit") or 6), 10),
+            limit=10,
         )
         hits = self.retriever.search(query)
+        if stance == "challenge":
+            ranked_hits = sorted(
+                enumerate(hits),
+                key=lambda item: (-self._challenge_signal_score(item[1]), item[0]),
+            )
+            hits = [hit for _, hit in ranked_hits]
+        hits = hits[: min(int(args.get("limit") or 6), 10)]
         self._seen_atom_ids.update(hit.atom_id for hit in hits)
         return ToolObservation(
             tool="search_hypothesis_evidence",
@@ -418,6 +432,21 @@ class CognitiveTools:
             },
             boundary="单侧命中不能证明假设；必须两侧都查，挑战证据不得隐藏。",
         )
+
+    @staticmethod
+    def _challenge_signal_score(hit: Any) -> int:
+        """对显式反例信号作稳定重排；仅用于候选排序，不是语义判决器。"""
+        fields = hit.fields
+        tags = {str(tag) for tag in fields.get("tags") or []}
+        title = str(fields.get("title") or "")
+        excerpt = str(fields.get("excerpt") or "")
+        text = f"{title}\n{excerpt}"
+        score = 8 if "反例" in tags else 0
+        score += 5 if "反例" in title else 0
+        for marker in ("仍会", "但是", "但", "不等于", "并非", "例外", "相反"):
+            if marker in text:
+                score += 1
+        return score
 
     # ── 7. 用户历史判定 ────────────────────────────────────────────────
     def get_user_verdicts(self, args: dict[str, Any]) -> ToolObservation:

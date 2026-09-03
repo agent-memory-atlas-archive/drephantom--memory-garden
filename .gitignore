@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.coverage
 dist/
 *.egg-info/
 
@@ -14,3 +15,4 @@ evals/retrieval_goldens.real.json
 evals/retrieval_goldens.real.sha256
 artifacts/evals/
 docs/RESUME.md
+docs/EVALUATION_SUMMARY.md

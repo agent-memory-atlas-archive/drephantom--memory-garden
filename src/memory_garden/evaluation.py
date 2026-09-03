@@ -13,7 +13,8 @@ import json
 import math
 import re
 from collections import Counter
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -36,30 +37,54 @@ class ScriptedProvider:
         self.cursor = 0
         self.endpoint_refs: list[int] = []
         self.endpoint_dates: list[str] = []
+        self.latest_refs: list[int] = []
+        self.challenge_refs: list[int] = []
 
     def _harvest(self, messages: list[dict[str, Any]]) -> None:
         for message in reversed(messages):
             if message.get("role") != "tool":
                 continue
             content = str(message.get("content") or "")
+            latest_ids = re.findall(r'"atom_id":\s*(\d+)', content)
+            if latest_ids:
+                self.latest_refs = [int(value) for value in latest_ids]
+            try:
+                rendered = content.splitlines()[1]
+                payload = json.loads(rendered)
+            except (IndexError, json.JSONDecodeError):
+                payload = {}
+            if payload.get("stance") == "challenge":
+                challenge_hits = [
+                    item for item in payload.get("hits", [])
+                    if "反例" in str(item.get("title") or "")
+                    or "反例" in " ".join(str(tag) for tag in item.get("tags") or [])
+                    or "求证" in str(item.get("title") or "")
+                ]
+                if challenge_hits:
+                    self.challenge_refs = [int(challenge_hits[0]["atom_id"])]
             # 端点引用与日期来自时间线/候选观察，而非最后一条反例命中
             if '"timeline"' in content or '"candidates"' in content:
-                ids = re.findall(r'"atom_id":\s*(\d+)', content)
-                if ids:
-                    self.endpoint_refs = [int(ids[0]), int(ids[-1])]
+                if latest_ids:
+                    self.endpoint_refs = [int(latest_ids[0]), int(latest_ids[-1])]
                 dates = re.findall(r'"date":\s*"(20\d{2}-\d{2}-\d{2})', content)
                 if dates:
                     self.endpoint_dates = [dates[0], dates[-1]]
             break
 
     @staticmethod
-    def _fill(text: str, refs: list[int], dates: list[str]) -> str:
+    def _fill(
+        text: str, refs: list[int], dates: list[str], latest_refs: list[int]
+    ) -> str:
         if len(refs) >= 2:
             text = text.replace("{EARLY}", str(refs[0])).replace("{RECENT}", str(refs[-1]))
         elif len(refs) == 1:
             text = text.replace(" [A{RECENT}]", "").replace("{EARLY}", str(refs[0]))
         # 未填充的占位引用整段剔除，避免脚本回答出现伪引用
         text = re.sub(r"\s*\[A\{(EARLY|RECENT)\}\]", "", text)
+        if latest_refs:
+            text = text.replace("{CHALLENGE}", str(latest_refs[0]))
+        else:
+            text = re.sub(r"\s*\[A\{CHALLENGE\}\]", "", text)
         text = text.replace("{EARLY_DATE}", dates[0] if dates else "").replace(
             "{RECENT_DATE}", dates[-1] if dates else ""
         )
@@ -74,7 +99,10 @@ class ScriptedProvider:
         if "tool" in step:
             call_id = f"call_{self.cursor}"
             args = {
-                key: self._fill(str(value), self.endpoint_refs, self.endpoint_dates)
+                key: self._fill(
+                    str(value), self.endpoint_refs, self.endpoint_dates,
+                    self.challenge_refs or self.latest_refs,
+                )
                 for key, value in (step.get("args") or {}).items()
             }
             return {
@@ -87,7 +115,10 @@ class ScriptedProvider:
                     }
                 ],
             }
-        text = self._fill(str(step.get("final", "")), self.endpoint_refs, self.endpoint_dates)
+        text = self._fill(
+            str(step.get("final", "")), self.endpoint_refs, self.endpoint_dates,
+            self.challenge_refs or self.latest_refs,
+        )
         return {"content": text, "tool_calls": []}
 
 
@@ -104,7 +135,8 @@ def standard_trace_script(topic: str, hypothesis: str) -> list[dict[str, Any]]:
             "final": (
                 "基于本轮核对：早期记录 [A{EARLY}] 与近期记录 [A{RECENT}] 的表达存在差异，"
                 "值得向你确认。区间内的经历与变化只是时间相邻，不等于因果；"
-                "与解释不一致的记录也已一并列出，最近一条是否仍代表你现在的看法需要你确认。"
+                "与解释不一致的记录 [A{CHALLENGE}] 也已一并列出，"
+                "最近一条是否仍代表你现在的看法需要你确认。"
             )
         },
     ]
@@ -118,10 +150,20 @@ class CaseResult:
     checks: dict[str, bool]
     passed: bool
     reply: str
+    tools_used: list[str] = field(default_factory=list)
+    stop_reason: str = ""
+    error: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    latency_ms: int = 0
+    private_vault_sent: bool = False
 
 
 def _run_case(
-    harness: AgentHarness, case: dict[str, Any], config: str
+    harness: AgentHarness,
+    case: dict[str, Any],
+    config: str,
+    provider_factory: Callable[[str], tuple[Any, bool]] | None = None,
 ) -> CaseResult:
     query = str(case["query"])
     # 评测用例之间判定记忆互不泄漏：每个用例前清空全部判定，再按需注入先验
@@ -133,7 +175,9 @@ def _run_case(
             " VALUES(NULL, ?, ?, ?, '2026-01-01T00:00:00Z')",
             (fallback_topic_key(query), prior["verdict"], prior.get("user_revision", "")),
         )
-    if config == "one_shot_baseline":
+    if provider_factory is not None:
+        provider, load_verdicts = provider_factory(config)
+    elif config == "one_shot_baseline":
         provider = ScriptedProvider(
             [{"final": f"关于「{query}」，你的想法经历了明显的演变，因为你的经历改变了你的看法。"}]
         )
@@ -147,17 +191,33 @@ def _run_case(
     answer = result.answer
 
     expected_type = str(case.get("expected_answer_type") or "")
+    requires_citation = bool(
+        case.get(
+            "requires_citation",
+            expected_type in {"traced_change", "no_clear_change"},
+        )
+    )
     checks: dict[str, bool] = {
         "task_completion": answer.answer_type == expected_type,
-        "citation_valid": _reply_refs_in_trace(result),
+        "citation_valid": _reply_refs_in_trace(
+            result, require_citation=requires_citation
+        ),
         "abstention_correct": bool(case.get("expect_abstain")) == answer.abstained,
     }
+    expected_titles = {
+        str(case[key])
+        for key in ("early_title", "recent_title")
+        if case.get(key)
+    }
+    if expected_titles:
+        checks["evidence_coverage"] = expected_titles.issubset(
+            _reply_citation_titles(harness.database, result)
+        )
     if case.get("challenge_title"):
-        counter_texts = " ".join(item.statement for item in answer.counter_evidence)
-        trace_text = json.dumps(result.trace, ensure_ascii=False)
+        challenge_title = str(case["challenge_title"])
         checks["counter_coverage"] = (
-            str(case["challenge_title"]) in counter_texts
-            or str(case["challenge_title"]) in trace_text
+            challenge_title in result.reply
+            or challenge_title in _reply_citation_titles(harness.database, result)
         )
     if case.get("prior_verdict"):
         checks["feedback_adherence"] = answer.answer_type == expected_type
@@ -179,17 +239,53 @@ def _run_case(
         checks=checks,
         passed=passed,
         reply=result.reply,
+        tools_used=[str(event.get("tool")) for event in (getattr(result, "trace", None) or [])],
+        stop_reason=result.stop_reason,
+        error=result.error,
+        prompt_tokens=result.prompt_tokens,
+        completion_tokens=result.completion_tokens,
+        latency_ms=result.latency_ms,
+        private_vault_sent=result.private_vault_sent,
     )
 
 
-def _reply_refs_in_trace(result: AgentRunResult) -> bool:
+def _reply_refs(result: AgentRunResult) -> set[int]:
+    return {int(value) for value in re.findall(r"\[A(\d+)\]", result.reply)}
+
+
+def _reply_refs_in_trace(
+    result: AgentRunResult, *, require_citation: bool = False
+) -> bool:
     trace_refs = {
         int(ref)
         for event in result.trace
         for ref in event.get("refs") or []
     }
-    reply_refs = {int(value) for value in re.findall(r"\[A(\d+)\]", result.reply)}
-    return not reply_refs or reply_refs.issubset(trace_refs)
+    reply_refs = _reply_refs(result)
+    if require_citation and not reply_refs:
+        return False
+    return reply_refs.issubset(trace_refs)
+
+
+def _reply_citation_titles(database: Database, result: AgentRunResult) -> set[str]:
+    titles: set[str] = set()
+    for atom_id in _reply_refs(result):
+        row = database.fetchone(
+            "SELECT s.title FROM source_atoms a JOIN sources s ON s.id=a.source_id "
+            "WHERE a.id=?",
+            (atom_id,),
+        )
+        if row is not None:
+            titles.add(str(row["title"]))
+    return titles
+
+
+def _percentile(values: list[int], quantile: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, math.ceil(quantile * len(ordered)) - 1))
+    return int(ordered[index])
 
 
 def run_comparative_eval(
@@ -197,19 +293,35 @@ def run_comparative_eval(
     retriever: HybridRetriever,
     cases: list[dict[str, Any]],
     output_dir: Path | None = None,
+    provider_factory: Callable[[str], tuple[Any, bool]] | None = None,
+    on_case_done: Callable[[str, str, bool], None] | None = None,
+    configs: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    configs = ["one_shot_baseline", "agent_without_feedback", "full_agent"]
+    selected_configs = list(
+        configs or ["one_shot_baseline", "agent_without_feedback", "full_agent"]
+    )
+    allowed_configs = {"one_shot_baseline", "agent_without_feedback", "full_agent"}
+    if not selected_configs or any(config not in allowed_configs for config in selected_configs):
+        raise ValueError("configs 必须从 one_shot_baseline/agent_without_feedback/full_agent 中选择")
     results: list[CaseResult] = []
-    for config in configs:
+    for config in selected_configs:
         harness = AgentHarness(database, retriever, _eval_settings())
         for case in cases:
-            results.append(_run_case(harness, case, config))
-    summary: dict[str, Any] = {"configs": {}, "total_cases": len(cases)}
+            item = _run_case(harness, case, config, provider_factory)
+            results.append(item)
+            if on_case_done is not None:
+                on_case_done(config, str(case["id"]), item.passed)
+    summary: dict[str, Any] = {
+        "mode": "real_provider" if provider_factory is not None else "scripted",
+        "configs": {},
+        "total_cases": len(cases),
+        "total_runs": len(cases) * len(selected_configs),
+    }
     metric_keys = [
         "task_completion", "citation_valid", "counter_coverage",
         "abstention_correct", "feedback_adherence", "no_causal_claim",
     ]
-    for config in configs:
+    for config in selected_configs:
         config_results = [item for item in results if item.config == config]
         metrics: dict[str, float] = {}
         for key in metric_keys:
@@ -221,6 +333,20 @@ def run_comparative_eval(
             )
         metrics["pass_rate"] = round(
             sum(item.passed for item in config_results) / len(config_results), 4
+        )
+        latencies = [item.latency_ms for item in config_results]
+        metrics["provider_error_rate"] = round(
+            sum(bool(item.error) for item in config_results) / len(config_results), 4
+        )
+        metrics["latency_p50_ms"] = _percentile(latencies, 0.50)
+        metrics["latency_p95_ms"] = _percentile(latencies, 0.95)
+        metrics["prompt_tokens"] = sum(item.prompt_tokens for item in config_results)
+        metrics["completion_tokens"] = sum(
+            item.completion_tokens for item in config_results
+        )
+        metrics["private_payload_rate"] = round(
+            sum(item.private_vault_sent for item in config_results) / len(config_results),
+            4,
         )
         summary["configs"][config] = metrics
     if output_dir is not None:
@@ -237,6 +363,13 @@ def run_comparative_eval(
                             "checks": item.checks,
                             "passed": item.passed,
                             "reply": item.reply,
+                            "tools_used": item.tools_used,
+                            "stop_reason": item.stop_reason,
+                            "error": item.error,
+                            "prompt_tokens": item.prompt_tokens,
+                            "completion_tokens": item.completion_tokens,
+                            "latency_ms": item.latency_ms,
+                            "private_vault_sent": item.private_vault_sent,
                         }
                         for item in results
                     ],

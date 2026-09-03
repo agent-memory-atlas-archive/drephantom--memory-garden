@@ -76,6 +76,8 @@ def test_stance_search_requires_both_sides(registry) -> None:
     )
     assert support.data["stance"] == "support"
     assert challenge.data["stance"] == "challenge"
+    assert challenge.data["hits"][0]["title"] == "仍会向朋友求证"
+    assert challenge.data["hits"][0]["title"] != support.data["hits"][0]["title"]
     assert "单侧命中不能证明假设" in support.boundary
 
 
