@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import contextlib
+import html
 import json
+import threading
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .agent import AgentHarness
 from .cli import build_database
@@ -19,8 +25,8 @@ from .retrieval import build_retriever
 
 
 class AskBody(BaseModel):
-    question: str
-    thread_id: int | None = None
+    question: str = Field(min_length=1, max_length=6000)
+    thread_id: int | None = Field(default=None, gt=0)
 
 
 class VerdictBody(BaseModel):
@@ -65,246 +71,33 @@ class EmbeddingBuildBody(BaseModel):
     confirm_cloud_send: bool = False
 
 
+class DismissBody(BaseModel):
+    discovery_id: int = Field(gt=0)
+
+
 # 页面与 Python 分离：用户可直接改 page.html 调整样式与文案（改完刷新即生效）
 PAGE_FILE = Path(__file__).resolve().parent / "page.html"
 
-SETTINGS_HTML = """<!doctype html>
-<html lang="zh"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>设置 · Memory Garden</title>
-<style>
- :root{--ink:#33302a;--sub:#8d8779;--pine:#3c5a47;--paper:#f7f5f0;--line:#e6e1d5}
- body{margin:0;background:var(--paper);color:var(--ink);font-family:system-ui,"Segoe UI",sans-serif;
-      display:flex;flex-direction:column;height:100vh}
- header{padding:18px 26px;background:linear-gradient(180deg,#33493b,#3c5a47);color:#f4f2ea;
-        display:flex;align-items:baseline;gap:14px}
- header h1{font-size:18px;margin:0}
- header a{color:#f4f2ea;font-size:12.5px;text-decoration:none}
- main{flex:1;overflow-y:auto}
- .wrap{max-width:640px;margin:0 auto;padding:28px 20px}
- h2{font-size:15px;color:var(--pine);margin:26px 0 10px}
- label{display:block;font-size:13px;color:var(--sub);margin:14px 0 5px}
- input,select{width:100%;padding:10px 12px;border:1px solid #d8d2c2;border-radius:10px;
-        font:inherit;font-size:14px;background:#fff;box-sizing:border-box;outline:none}
- input:focus,select:focus{border-color:#b5a16b}
- .hint{font-size:12px;color:var(--sub);margin-top:4px;line-height:1.6}
- button{background:var(--pine);color:#fff;border:0;border-radius:10px;padding:11px 26px;
-        font:inherit;font-size:14.5px;cursor:pointer;margin-top:22px}
- .saved{color:#3c7a4e;font-size:13.5px;margin-left:14px}
- .warn{background:#faf6ec;border:1px solid #efe6cf;border-radius:10px;padding:12px 14px;
-       font-size:13px;color:#8a6d3b;line-height:1.8;margin-top:18px}
-</style></head><body>
-<header><h1>设置</h1><a href="/">← 回到对话</a></header>
-<main><div class="wrap">
- <h2>她</h2>
- <label>名字</label>
- <input id="name" placeholder="知微">
- <div class="hint">出现在头像、标题和她对自己的称呼里。性格在项目根目录 soul.md 里改，改完即时生效。</div>
-
- <h2>连接模型（OpenAI 兼容）</h2>
- <label>后端</label>
- <select id="backend"><option value="local">local · 离线确定性（无需密钥，回答来自固定管线）</option>
- <option value="deepseek">模型工具循环（真实对话与发现）</option></select>
- <label>Base URL</label>
- <input id="base" placeholder="https://api.deepseek.com">
- <label>模型名</label>
- <input id="model" placeholder="deepseek-v4-flash">
- <label>API Key</label>
- <input id="key" type="password" placeholder="">
- <div class="hint" id="keyhint"></div>
-
- <h2>检索与 Embedding</h2>
- <label>检索模式</label>
- <select id="retrieval"><option value="hybrid">hybrid · BM25 + 当前向量后端</option>
- <option value="bm25">bm25 · 仅 SQLite FTS5</option>
- <option value="hash_vector">hash_vector · 仅离线字符 n-gram</option>
- <option value="embedding">embedding · 仅 mock/API Embedding</option></select>
- <label>Embedding 后端</label>
- <select id="embedding"><option value="local_hash">local_hash · 默认离线，不发送数据</option>
- <option value="mock">mock · 仅测试，不代表真实模型效果</option>
- <option value="api">api · OpenAI 兼容 /embeddings</option></select>
- <label>Embedding 服务商标识</label>
- <input id="embeddingProvider" placeholder="siliconflow">
- <label>Embedding Base URL</label>
- <input id="embeddingBase" placeholder="https://api.siliconflow.cn/v1">
- <label>Embedding 模型名</label>
- <input id="embeddingModel" placeholder="BAAI/bge-m3">
- <label>Embedding API Key</label>
- <input id="embeddingKey" type="password" placeholder="">
- <label>第二阶段重排序</label>
- <select id="reranker"><option value="local_heuristic">local_heuristic · 离线确定性规则重排</option>
- <option value="api">api · 真实 cross-encoder /rerank</option>
- <option value="none">none · 仅保留 RRF 排序</option></select>
- <label>Rerank 服务商标识</label>
- <input id="rerankerProvider" placeholder="siliconflow">
- <label>Rerank Base URL</label>
- <input id="rerankerBase" placeholder="https://api.siliconflow.cn/v1">
- <label>Rerank 模型名</label>
- <input id="rerankerModel" placeholder="BAAI/bge-reranker-v2-m3">
- <label>Rerank API Key</label>
- <input id="rerankerKey" type="password" placeholder="留空则沿用 Embedding Key">
- <label>重排序候选数</label>
- <input id="rerankLimit" type="number" min="1" max="200" value="30">
- <label>Cross-Encoder 与 RRF 的合并方式</label>
- <select id="rerankerFusion"><option value="rank_fusion">rank_fusion · 融合两种排名（默认）</option>
- <option value="replace">replace · 只使用 Cross-Encoder 排名（实验对照）</option></select>
- <div class="hint">local_heuristic 会综合 RRF 分数、查询词覆盖、标题/标签命中和双路一致性；
-  它是可复现基线，不是 cross-encoder 或真实神经重排序模型。上方合并方式仅作用于 API Rerank。</div>
- <label><input id="allowCloud" type="checkbox" style="width:auto;margin-right:8px">
- 明确允许云端 Embedding</label>
- <label><input id="allowCloudRerank" type="checkbox" style="width:auto;margin-right:8px">
- 明确允许云端 cross-encoder Rerank</label>
- <div class="warn">默认不会上传私人笔记。只有选择 api 且勾选上方开关后，检索才允许把
-   <strong>每条原子的标题、标题层级、标签、正文</strong>分批发送到配置的 /embeddings 接口；查询文本也会发送。
-   开启 API Rerank 后还会发送<strong>查询文本与 RRF 候选的标题、标题层级、标签、正文</strong>。
-   原始 Vault 仍只读，返回向量只写入派生数据库。Web 启动本身不会批量发送云端向量，
-   也不会在没有查询时调用 Rerank。</div>
- <button type="button" onclick="buildEmbeddings()">显式构建当前向量缓存</button>
- <span class="saved" id="buildmsg"></span>
- <div class="hint">此按钮使用进程当前已加载的配置；保存设置后请先重启，再执行构建。</div>
-
- <h2>数据</h2>
- <label>Obsidian Vault 路径（只读）</label>
- <input id="vault" placeholder="D:/path/to/Obsidian Vault">
- <div class="hint">密钥保存在本机 .local/settings.json（已被 .gitignore 排除，不会进仓库）。
-  保存后需要重启生效：双击 stop-memory-garden.bat，再双击 start-memory-garden.bat。</div>
- <button onclick="save()">保存</button><span class="saved" id="msg"></span>
-</div></main>
-<script>
-fetch('/api/settings').then(r=>r.json()).then(s=>{
-  document.getElementById('name').value = s.assistant_name || '';
-  document.getElementById('base').value = s.llm_base_url || '';
-  document.getElementById('model').value = s.llm_chat_model || '';
-  document.getElementById('embeddingProvider').value = s.embedding_provider || 'openai_compatible';
-  document.getElementById('embeddingBase').value = s.embedding_base_url || '';
-  document.getElementById('embeddingModel').value = s.llm_embedding_model || '';
-  document.getElementById('rerankerProvider').value = s.reranker_provider || 'openai_compatible';
-  document.getElementById('rerankerBase').value = s.reranker_base_url || '';
-  document.getElementById('rerankerModel').value = s.reranker_model || '';
-  document.getElementById('vault').value = s.vault_path || '';
-  document.getElementById('backend').value = s.backend || 'local';
-  document.getElementById('embedding').value = s.embedding_backend || 'local_hash';
-  document.getElementById('retrieval').value = s.retrieval_mode || 'hybrid';
-  document.getElementById('reranker').value = s.reranker_backend || 'local_heuristic';
-  document.getElementById('rerankLimit').value = s.rerank_candidate_limit || 30;
-  document.getElementById('rerankerFusion').value = s.reranker_fusion || 'rank_fusion';
-  document.getElementById('allowCloud').checked = !!s.allow_cloud_embedding;
-  document.getElementById('allowCloudRerank').checked = !!s.allow_cloud_rerank;
-  document.getElementById('key').placeholder = s.api_key_set
-    ? '已保存——留空表示不修改' : 'sk-...';
-  document.getElementById('embeddingKey').placeholder = s.embedding_api_key_set
-    ? '已保存——留空表示不修改' : 'sk-...';
-  document.getElementById('rerankerKey').placeholder = s.reranker_api_key_set
-    ? '已保存——留空表示不修改' : '可留空沿用 Embedding Key';
-});
-function save(){
-  const body = {
-    assistant_name: document.getElementById('name').value.trim(),
-    llm_base_url: document.getElementById('base').value.trim(),
-    llm_chat_model: document.getElementById('model').value.trim(),
-    embedding_provider: document.getElementById('embeddingProvider').value.trim(),
-    embedding_base_url: document.getElementById('embeddingBase').value.trim(),
-    llm_embedding_model: document.getElementById('embeddingModel').value.trim(),
-    vault_path: document.getElementById('vault').value.trim(),
-    backend: document.getElementById('backend').value,
-    embedding_backend: document.getElementById('embedding').value,
-    retrieval_mode: document.getElementById('retrieval').value,
-    reranker_backend: document.getElementById('reranker').value,
-    reranker_provider: document.getElementById('rerankerProvider').value.trim(),
-    reranker_base_url: document.getElementById('rerankerBase').value.trim(),
-    reranker_model: document.getElementById('rerankerModel').value.trim(),
-    rerank_candidate_limit: parseInt(document.getElementById('rerankLimit').value || '30'),
-    reranker_fusion: document.getElementById('rerankerFusion').value,
-    allow_cloud_embedding: document.getElementById('allowCloud').checked,
-    allow_cloud_rerank: document.getElementById('allowCloudRerank').checked,
-  };
-  const key = document.getElementById('key').value.trim();
-  if (key) body.llm_api_key = key;
-  const embeddingKey = document.getElementById('embeddingKey').value.trim();
-  if (embeddingKey) body.embedding_api_key = embeddingKey;
-  const rerankerKey = document.getElementById('rerankerKey').value.trim();
-  if (rerankerKey) body.reranker_api_key = rerankerKey;
-  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body)}).then(r=>r.json()).then(()=>{
-      document.getElementById('msg').textContent = '已保存，重启后生效。';
-    });
-}
-function buildEmbeddings(){
-  const cloud = document.getElementById('embedding').value === 'api';
-  if (cloud && !confirm('这会把标题、标题层级、标签、正文批量发送到已配置的 Embedding API。继续吗？')) return;
-  fetch('/api/embeddings/build',{method:'POST',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({confirm_cloud_send: cloud})}).then(async r=>{
-      const data = await r.json();
-      document.getElementById('buildmsg').textContent = r.ok
-        ? '已构建 ' + data.vectors_rebuilt + ' 条。' : (data.error || '构建失败');
-    });
-}
-</script></body></html>"""
 
 
 def load_page(settings: Settings) -> str:
     if PAGE_FILE.exists():
-        name = settings.assistant_name
+        name = html.escape(settings.assistant_name, quote=True)
         return PAGE_FILE.read_text(encoding="utf-8").replace("{{NAME}}", name)
     return "<html><body><p>page.html 缺失，请重新拉取仓库。</p></body></html>"
 
-HISTORY_HTML = """<!doctype html>
-<html lang="zh"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>历史 · Memory Garden</title>
-<style>
- body{margin:0;background:#f7f5f0;color:#33302a;font-family:system-ui,"Segoe UI",sans-serif;
-      display:flex;flex-direction:column;height:100vh}
- header{padding:18px 26px;background:linear-gradient(180deg,#33493b,#3c5a47);color:#f4f2ea;
-        display:flex;align-items:baseline;gap:14px}
- header h1{font-size:18px;margin:0}
- header a{color:#f4f2ea;font-size:12.5px;text-decoration:none}
- main{flex:1;overflow-y:auto}
- .wrap{max-width:680px;margin:0 auto;padding:26px 20px}
- .item{display:block;background:#fff;border:1px solid #e6e1d5;border-radius:12px;
-       padding:14px 18px;margin-bottom:12px;text-decoration:none;color:inherit}
- .item:hover{border-color:#b5a16b}
- .item .t{font-size:14.5px;margin-bottom:4px}
- .item .m{font-size:12px;color:#8d8779}
- .new{display:inline-block;background:#3c5a47;color:#fff;border-radius:10px;padding:10px 20px;
-      text-decoration:none;font-size:14px;margin-bottom:20px}
- .empty{color:#8d8779;font-size:14px}
-</style></head><body>
-<header><h1>历史对话</h1><a href="/">← 回到对话</a> <a href="/settings">设置</a></header>
-<main><div class="wrap">
-<a class="new" href="/">＋ 开始新对话</a>
-<div id="list"></div>
-</div></main>
-<script>
-fetch('/api/threads').then(r=>r.json()).then(ts=>{
-  const box = document.getElementById('list');
-  if (!ts.length){ box.innerHTML = '<div class="empty">还没有对话。回首页说第一句话吧。</div>'; return; }
-  ts.forEach(function(t){
-    const a = document.createElement('a'); a.className='item'; a.href = '/?thread=' + t.thread_id;
-    const title = (t.title||'（未命名）').slice(0,50);
-    const when = (t.last_at||'').replace('T',' ').slice(0,16);
-    const titleNode = document.createElement('div'); titleNode.className='t';
-    titleNode.textContent = title;
-    const metaNode = document.createElement('div'); metaNode.className='m';
-    metaNode.textContent = when + ' · ' + t.turns + ' 条消息';
-    a.appendChild(titleNode); a.appendChild(metaNode);
-    box.appendChild(a);
-  });
-});
-</script></body></html>"""
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.load()
     database: Database = build_database(settings)
     retriever = build_retriever(database, settings)
-    # serve 自包含：空库时自动完成一次只读同步。云端向量绝不在 Web 启动时批量发送。
-    if not database.fetchone("SELECT 1 FROM sources LIMIT 1"):
-        from .importer import VaultSyncService
+    # 启动时同步当前版本；先校验 Vault 绑定，云端向量不在启动时发送。
+    from .importer import VaultSyncService
 
-        VaultSyncService(database, settings.vault_path).sync()
-        if "vector" in retriever.routes and not retriever.vector.is_cloud:
-            retriever.vector.ensure_vectors()
+    VaultSyncService(database, settings.vault_path).sync()
+    if "vector" in retriever.routes and not retriever.vector.is_cloud:
+        retriever.vector.ensure_vectors()
     provider = None
     if settings.backend != "local" and settings.llm_ready:
         from .agent import OpenAIProvider
@@ -312,8 +105,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         provider = OpenAIProvider(OpenAICompatibleClient(settings))
     harness = AgentHarness(database, retriever, settings, provider=provider)
+    operation_lock = threading.Lock()
 
     app = FastAPI(title="Memory Garden", version="2.0.0")
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost', '[::1]', 'testserver'])
+    app.mount('/static', StaticFiles(directory=PAGE_FILE.parent / 'static'), name='static')
+
+    @app.middleware('http')
+    async def check_origin(request: Request, call_next):
+        origin = request.headers.get('origin')
+        if (origin and urlsplit(origin).netloc != request.headers.get('host')) or request.headers.get('sec-fetch-site') == 'cross-site':
+            return JSONResponse({'error': '请从本机 Memory Garden 页面发起操作。'}, status_code=403)
+        response = await call_next(request)
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Referrer-Policy'] = 'no-referrer'
+        if request.url.path in {'/', '/settings', '/history'}:
+            response.headers['Content-Security-Policy'] = (
+                "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+                "img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+            )
+        return response
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -321,13 +133,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page() -> str:
-        return SETTINGS_HTML
+        return (PAGE_FILE.parent / 'settings.html').read_text(encoding='utf-8')
 
     @app.get("/history", response_class=HTMLResponse)
     def history_page() -> str:
-        return HISTORY_HTML
+        return (PAGE_FILE.parent / 'history.html').read_text(encoding='utf-8')
 
-    RUNTIME_SETTINGS_FILE = Path(settings.database_path).parent / "settings.json"
+    RUNTIME_SETTINGS_FILE = settings.runtime_settings_path or Path(settings.database_path).parent / "settings.json"
 
     @app.get("/api/settings")
     def get_settings() -> JSONResponse:
@@ -354,6 +166,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "api_key_set": bool(settings.llm_api_key),
                 "embedding_api_key_set": bool(settings.embedding_api_key),
                 "reranker_api_key_set": bool(settings.reranker_api_key),
+                "public_demo_mode": settings.public_demo_mode,
+                "demo_use_model": settings.demo_use_model,
             }
         )
 
@@ -367,6 +181,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except json.JSONDecodeError:
                 current = {}
         allowed_values = {
+            'backend': {'local', 'deepseek'},
             "embedding_backend": {"local_hash", "mock", "api"},
             "retrieval_mode": {"bm25", "hash_vector", "embedding", "hybrid"},
             "reranker_backend": {"none", "local_heuristic", "api"},
@@ -376,6 +191,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             value = getattr(body, field).strip().lower()
             if value and value not in choices:
                 return JSONResponse({"error": f"{field} 值无效"}, status_code=400)
+        if body.vault_path.strip():
+            candidate_vault = Path(body.vault_path.strip())
+            if not candidate_vault.is_dir():
+                return JSONResponse({'error': '笔记库路径不存在，请检查后再保存。'}, status_code=400)
+            if candidate_vault.resolve() != settings.vault_path.resolve():
+                return JSONResponse({'error': '为保护历史记录，切换笔记库需使用独立数据库。请通过新的 MG_DATABASE_PATH 配置启动。'}, status_code=400)
         effective_embedding = (
             body.embedding_backend.strip().lower()
             or str(current.get("embedding_backend") or settings.embedding_backend)
@@ -444,6 +265,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             current["embedding_api_key"] = body.embedding_api_key.strip()
         if body.reranker_api_key.strip():
             current["reranker_api_key"] = body.reranker_api_key.strip()
+        setting_fields = {field.name for field in fields(Settings)}
+        effective = {key: value for key, value in current.items() if key in setting_fields}
+        if 'vault_path' in effective:
+            effective['vault_path'] = Path(effective['vault_path'])
+        candidate = replace(settings, **effective)
+        if candidate.backend != 'local' and not candidate.llm_ready:
+            return JSONResponse({'error': '连接模型需要填写服务地址、模型名和 API Key。'}, status_code=400)
+        try:
+            # 只检查配置，不发起请求；不能保存会导致下次启动失败的组合。
+            build_retriever(database, candidate)
+        except (RuntimeError, ValueError) as exc:
+            return JSONResponse({'error': str(exc)}, status_code=400)
         RUNTIME_SETTINGS_FILE.write_text(
             json.dumps(current, ensure_ascii=False, indent=1), encoding="utf-8"
         )
@@ -462,10 +295,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 },
                 status_code=400,
             )
+        if not operation_lock.acquire(blocking=False):
+            return JSONResponse({'error': '正在处理上一项操作，请稍后再试。'}, status_code=409)
         try:
             filled = retriever.vector.ensure_vectors()
         except (RuntimeError, ValueError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        finally:
+            operation_lock.release()
         return JSONResponse(
             {
                 "vectors_rebuilt": filled,
@@ -477,11 +314,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/ask")
     def ask(body: AskBody) -> JSONResponse:
-        result = harness.run(body.question, thread_id=body.thread_id)
+        if not body.question.strip():
+            return JSONResponse({'error': '请先写下一句话。'}, status_code=400)
+        if body.thread_id is not None and not database.fetchone('SELECT 1 FROM threads WHERE id=?', (body.thread_id,)):
+            return JSONResponse({'error': '这段对话不存在，请开始新的回看。'}, status_code=404)
+        if not operation_lock.acquire(blocking=False):
+            return JSONResponse({'error': '还有一项回看正在进行。完成后再试就好。'}, status_code=409)
+        try:
+            result = harness.run(body.question, thread_id=body.thread_id)
+        except (RuntimeError, ValueError):
+            return JSONResponse({'error': '这次回看没有完成。请检查连接与检索设置，原始笔记未被修改。'}, status_code=503)
+        finally:
+            operation_lock.release()
         # 判定按钮只在结论型回答后出现；情感陪伴/澄清追问后面挂表单会非常出戏
-        verdict_worthy = result.answer.answer_type in {"traced_change", "no_clear_change"} or bool(
-            result.answer.question_to_user
-        )
+        verdict_worthy = result.answer.answer_type in {"traced_change", "no_clear_change"}
         # 未知项过滤掉每次都一样的套话，只留真正针对本轮的
         unknowns = [
             u for u in result.answer.unknowns
@@ -517,19 +363,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(saved)
 
     @app.get("/api/discover")
-    def discover(limit: int = 5) -> JSONResponse:
+    def discover(limit: int = Query(default=3, ge=1, le=5)) -> JSONResponse:
         classifier = None
-        if settings.llm_ready:
+        if settings.backend != 'local' and settings.llm_ready:
             from .llm import OpenAICompatibleClient
             from .snapshots import LLMChangeClassifier
 
             classifier = LLMChangeClassifier(OpenAICompatibleClient(settings))
         service = DiscoveryService(database, retriever, classifier)
-        _, candidates = service.run_scan(limit=limit)
-        service.mark_shown([item.discovery_id for item in candidates])
+        if not operation_lock.acquire(blocking=False):
+            return JSONResponse({'error': '正在回看记录，请稍后再试。'}, status_code=409)
+        try:
+            _, candidates = service.run_scan(limit=limit)
+            service.mark_shown([item.discovery_id for item in candidates])
+        finally:
+            operation_lock.release()
         return JSONResponse(
             {"candidates": [item.model_dump() for item in candidates]}
         )
+
+    @app.post('/api/discover/dismiss')
+    def dismiss_discovery(body: DismissBody) -> JSONResponse:
+        try:
+            return JSONResponse(DiscoveryService(database, retriever).dismiss(body.discovery_id))
+        except KeyError:
+            return JSONResponse({'error': '这条线索已不可用。'}, status_code=404)
+
+    @app.post('/api/sync')
+    def sync_vault() -> JSONResponse:
+        if not operation_lock.acquire(blocking=False):
+            return JSONResponse({'error': '正在回看记录，请稍后再更新索引。'}, status_code=409)
+        try:
+            report = VaultSyncService(database, settings.vault_path).sync()
+            return JSONResponse({'synced': True, 'changed': report['changed']})
+        except ValueError as exc:
+            return JSONResponse({'error': str(exc)}, status_code=400)
+        finally:
+            operation_lock.release()
 
     class ReactBody(BaseModel):
         discovery_id: int
@@ -607,6 +477,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if r["answer_json"]:
                 with contextlib.suppress(json.JSONDecodeError):
                     item["answer"] = json.loads(str(r["answer_json"]))
+            saved_verdict = database.fetchone(
+                'SELECT verdict, user_revision FROM verdicts WHERE message_id=? ORDER BY id DESC LIMIT 1',
+                (r['id'],),
+            )
+            if saved_verdict:
+                item['verdict'] = dict(saved_verdict)
             out.append(item)
         return JSONResponse(out)
 
@@ -616,7 +492,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for table in ("sources", "source_atoms", "messages", "agent_runs", "verdicts"):
             row = database.fetchone(f"SELECT COUNT(*) AS n FROM {table}")
             counts[table] = int(row["n"]) if row else 0
-        return JSONResponse({"ok": True, "backend": settings.backend, "counts": counts})
+        present_sources = database.fetchone('SELECT COUNT(*) AS n FROM sources WHERE is_present=1')
+        active_atoms = database.fetchone(
+            'SELECT COUNT(*) AS n FROM source_atoms a JOIN sources s ON s.id=a.source_id '
+            'WHERE a.is_current=1 AND s.is_present=1'
+        )
+        counts['sources'] = int(present_sources['n']) if present_sources else 0
+        counts['source_atoms'] = int(active_atoms['n']) if active_atoms else 0
+        last_sync = database.fetchone('SELECT created_at FROM sync_runs ORDER BY id DESC LIMIT 1')
+        return JSONResponse({
+            'ok': True, 'backend': settings.backend, 'counts': counts,
+            'assistant_name': settings.assistant_name, 'public_demo_mode': settings.public_demo_mode,
+            'demo_use_model': settings.demo_use_model,
+            'generation_model': settings.llm_chat_model if provider else None,
+            'generation_connected': provider is not None,
+            'cloud_retrieval': retriever.vector.is_cloud or settings.reranker_backend == 'api',
+            'last_sync': last_sync['created_at'] if last_sync else None,
+        })
 
     return app
 

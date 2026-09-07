@@ -33,6 +33,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/memory_garden"]
 
+[tool.hatch.build]
+# 私有的本地回答评测实验由 .git/info/exclude 管理；打包器不会读取该排除文件。
+exclude = ["src/memory_garden/rag_evaluation.py"]
+
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]

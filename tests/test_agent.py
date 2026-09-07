@@ -97,7 +97,10 @@ def test_cloud_tool_observation_is_recorded_as_private_vault_sent(
         def __init__(self) -> None:
             self.cursor = 0
 
-        def chat_with_tools(self, messages, tools, timeout_seconds=None):
+        def chat_with_tools(self, messages, tools, timeout_seconds=None, tool_choice=None):
+            if tools and tools[0]['name'] == 'plan_turn':
+                return {'tool_calls': [{'function': {'name': 'plan_turn', 'arguments':
+                    '{"intent":"cognitive_trace","query":"自主判断","reply":"","updates_current_view":false}'}}]}
             tool_messages = [message for message in messages if message.get("role") == "tool"]
             calls = [
                 ("search_sources", '{"query":"自主判断","limit":8}'),
@@ -139,8 +142,9 @@ def test_cloud_tool_observation_is_recorded_as_private_vault_sent(
                 match = re.search(r'"atom_id":\s*(\d+)', str(tool_messages[-1]["content"]))
                 assert match is not None
                 return {
-                    "content": f"这条记录可以作为本轮核对起点 [A{match.group(1)}]，但证据仍有限。",
-                    "tool_calls": [],
+                    "content": "这段工具过程不能呈现给用户。",
+                    "tool_calls": [{'function': {'name': 'finish_response', 'arguments':
+                        '{"reply":"这条记录可以作为本轮核对起点 [A'+match.group(1)+']，但证据仍有限。"}'}}],
                 }
             return {
                 "content": "这条记录可以作为这一轮核对的起点，不过现有证据仍然有限，需要你确认。",
@@ -152,12 +156,10 @@ def test_cloud_tool_observation_is_recorded_as_private_vault_sent(
     provider = OpenAIProvider(FakeCloudClient())  # type: ignore[arg-type]
     result = AgentHarness(database, retriever, cloud_settings, provider=provider).run("自主判断")
     assert result.private_vault_sent is True
-    # 呈现改写删除了草稿引用时必须被拒绝；最终输出仍保留通过守卫的引用。
+    # 模型最终回答保留通过守卫的引用，不再另调模型压缩并改写一次。
     assert re.search(r"\[A\d+\]", result.reply)
-    assert any(
-        event.get("tool") == "presentation_rewrite_rejected"
-        for event in result.trace
-    )
+    assert result.trace[0]['tool'] == 'plan_turn'
+    assert not any(event.get('tool', '').startswith('presentation_rewrite') for event in result.trace)
     row = database.fetchone(
         "SELECT private_vault_sent FROM agent_runs WHERE message_id=?", (result.message_id,)
     )

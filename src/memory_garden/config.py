@@ -48,6 +48,7 @@ def _secret_from_env(
 class Settings:
     vault_path: Path
     database_path: Path
+    runtime_settings_path: Path | None = None
     soul_path: Path | None = None  # 人格文件；每条消息热加载（学 Hermes SOUL.md）
     assistant_name: str = "知微"
     backend: str = "local"  # "local" (deterministic offline) | "deepseek" (tool loop)
@@ -82,6 +83,7 @@ class Settings:
     agent_max_repeat_calls: int = 2
     agent_no_progress_steps: int = 3
     public_demo_mode: bool = False
+    demo_use_model: bool = False
     _env: dict[str, str] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -90,10 +92,18 @@ class Settings:
         # 优先级：进程环境 > 运行时设置（设置页写入） > .env 文件 > 默认值。
         # 运行时设置只接受非空值，使用者无需修改仓库文件即可完成配置。
         env: dict[str, str] = load_env_file(root / ".env")
-        runtime_file = root / ".local" / "settings.json"
-        if runtime_file.exists():
+        demo_requested = _as_bool(os.environ.get('MG_PUBLIC_DEMO_MODE', env.get('MG_PUBLIC_DEMO_MODE')), False)
+        demo_model_requested = _as_bool(os.environ.get('MG_DEMO_USE_MODEL', env.get('MG_DEMO_USE_MODEL')), False)
+        runtime_file = root / '.local' / (
+            'agent-demo-settings.json' if demo_requested and demo_model_requested
+            else 'demo-settings.json' if demo_requested else 'settings.json'
+        )
+        runtime_read_file = runtime_file
+        if demo_requested and demo_model_requested and not runtime_read_file.exists():
+            runtime_read_file = root / '.local' / 'settings.json'
+        if runtime_read_file.exists():
             try:
-                runtime = json.loads(runtime_file.read_text(encoding="utf-8"))
+                runtime = json.loads(runtime_read_file.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 runtime = {}
             for key, mg_key in (
@@ -142,9 +152,10 @@ class Settings:
         embedding_base_url = env.get("MG_EMBEDDING_BASE_URL", "")
         reranker_base_url = env.get("MG_RERANKER_BASE_URL", "")
         settings = cls(
-            vault_path=Path(env.get("MG_VAULT_PATH", str(root / "evals" / "cognitive_mvp_vault"))),
+            vault_path=Path(env.get("MG_VAULT_PATH") or str(root / "evals" / "cognitive_mvp_vault")),
             database_path=Path(env.get("MG_DATABASE_PATH", str(root / ".local" / "memory_garden.db"))),
-            soul_path=Path(env.get("MG_SOUL_PATH", str(root / "soul.md"))),
+            runtime_settings_path=runtime_file,
+            soul_path=Path(env.get("MG_SOUL_PATH") or str(root / "soul.md")),
             backend=env.get("MG_ASSISTANT_BACKEND", "local"),
             llm_base_url=env.get("MG_LLM_BASE_URL", ""),
             llm_api_key=key,
@@ -184,13 +195,27 @@ class Settings:
             agent_max_repeat_calls=int(env.get("MG_AGENT_MAX_REPEAT_CALLS", "2")),
             agent_no_progress_steps=int(env.get("MG_AGENT_NO_PROGRESS_STEPS", "3")),
             public_demo_mode=_as_bool(env.get("MG_PUBLIC_DEMO_MODE"), False),
+            demo_use_model=_as_bool(env.get("MG_DEMO_USE_MODEL"), False),
         )
         settings._env = env
         if settings.public_demo_mode:
-            # 公共演示模式下，Vault 必须指向仓库内的合成数据，否则拒绝启动。
-            allowed = (root / "evals" / "cognitive_mvp_vault").resolve()
-            if settings.vault_path.resolve() != allowed:
-                raise ValueError("公共演示模式仅允许指向仓库内合成 Sample Vault")
+            # 演示隔离数据与连接，不能沿用已保存的私有 Vault 或云端配置。
+            settings.vault_path = (root / "evals" / "cognitive_mvp_vault").resolve()
+            settings.database_path = root / '.local' / ('agent-demo.db' if settings.demo_use_model else 'demo.db')
+            settings.runtime_settings_path = runtime_file
+            if settings.demo_use_model:
+                settings.backend = 'deepseek'
+                if not settings.llm_ready:
+                    raise ValueError('Agent 演示需要已配置的生成模型连接。请在普通模式设置模型，或运行离线演示。')
+            else:
+                settings.backend = 'local'
+                settings.llm_base_url = settings.llm_api_key = settings.llm_chat_model = ''
+            settings.embedding_base_url = settings.embedding_api_key = ''
+            settings.reranker_base_url = settings.reranker_api_key = ''
+            settings.retrieval_mode = 'hybrid'
+            settings.embedding_backend = 'local_hash'
+            settings.reranker_backend = 'local_heuristic'
+            settings.allow_cloud_embedding = settings.allow_cloud_rerank = False
         return settings
 
     @property

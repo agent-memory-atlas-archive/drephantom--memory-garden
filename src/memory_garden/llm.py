@@ -6,9 +6,11 @@ import math
 import re
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
+from .budget import remaining
 from .config import Settings
 
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
@@ -126,7 +128,8 @@ class OpenAICompatibleClient:
         for attempt in range(self.settings.llm_max_retries + 1):
             try:
                 response = self._network_client().post(
-                    self._url(suffix), headers=self._headers(), json=body
+                    self._url(suffix), headers=self._headers(), json=body,
+                    timeout=remaining(self.settings.llm_timeout_seconds),
                 )
                 if response.status_code in _RETRYABLE_STATUS:
                     raise httpx.HTTPStatusError(
@@ -156,7 +159,7 @@ class OpenAICompatibleClient:
             except (json.JSONDecodeError, ValueError) as exc:
                 raise LLMError(f"{operation} 响应不是有效 JSON 对象") from exc
             if attempt < self.settings.llm_max_retries:
-                time.sleep(0.5 * (2**attempt))
+                time.sleep(min(0.5 * (2**attempt), remaining(self.settings.llm_timeout_seconds)))
         raise LLMError(redact(f"{operation} 请求失败：{last_error}", self.api_key))
 
     def chat(self, body: dict[str, Any], timeout_seconds: float | None = None) -> dict[str, Any]:
@@ -166,13 +169,22 @@ class OpenAICompatibleClient:
         防止流式思考输出不断重置读超时导致整体护栏失效。
         """
         timeout = timeout_seconds or self.settings.llm_timeout_seconds
-        if self.settings.llm_reasoning_effort and "reasoning_effort" not in body:
-            body = {**body, "reasoning_effort": self.settings.llm_reasoning_effort}
+        if (self.settings.llm_reasoning_effort and "reasoning_effort" not in body
+                and body.get('thinking') != {'type': 'disabled'}):
+            # DeepSeek Chat Completions uses thinking.type to disable reasoning;
+            # reasoning_effort=none belongs to other API formats/providers.
+            if (urlparse(self.base_url or '').hostname == 'api.deepseek.com'
+                    and self.settings.llm_reasoning_effort == 'none'):
+                body = {**body, 'thinking': {'type': 'disabled'}}
+            else:
+                body = {**body, "reasoning_effort": self.settings.llm_reasoning_effort}
         last_error: Exception | None = None
         started = time.monotonic()
+        deadline = started + timeout
         for attempt in range(self.settings.llm_max_retries + 1):
             try:
-                with httpx.Client(timeout=timeout) as client:
+                attempt_timeout = remaining(deadline - time.monotonic())
+                with httpx.Client(timeout=attempt_timeout) as client:
                     self.total_requests += 1
                     response = client.post(
                         self._url("chat/completions"), headers=self._headers(), json=body
@@ -201,12 +213,15 @@ class OpenAICompatibleClient:
                 last_error = exc
             except (json.JSONDecodeError, ValueError) as exc:
                 raise LLMError("模型响应不是有效 JSON 对象") from exc
-            time.sleep(0.5 * (2**attempt))
+            if attempt < self.settings.llm_max_retries:
+                delay = remaining(deadline - time.monotonic())
+                time.sleep(min(0.5 * (2**attempt), delay))
         raise LLMError(redact(f"模型调用失败：{last_error}", self.api_key))
 
     def chat_with_tools(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]],
         timeout_seconds: float | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self.settings.llm_chat_model,
@@ -215,7 +230,10 @@ class OpenAICompatibleClient:
         }
         if tools:
             body["tools"] = [{"type": "function", "function": tool} for tool in tools]
-            body["tool_choice"] = "auto"
+            body["tool_choice"] = tool_choice or "auto"
+            if tool_choice and tool_choice != 'auto' and urlparse(self.base_url or '').hostname == 'api.deepseek.com':
+                # Forced structured decisions/final replies require DeepSeek non-thinking mode.
+                body['thinking'] = {'type': 'disabled'}
         raw = self.chat(body, timeout_seconds=timeout_seconds)
         try:
             return raw["choices"][0]["message"]

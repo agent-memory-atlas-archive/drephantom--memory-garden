@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # v1 → v2：discoveries 增加变化分类学/信号类型/呈现追踪列（存量库增量迁移）
 _V2_DISCOVERY_COLUMNS = {
@@ -68,7 +68,9 @@ CREATE TABLE IF NOT EXISTS source_atoms (
     line_end INTEGER NOT NULL,
     recorded_at TEXT,
     event_time TEXT,
-    authorship TEXT NOT NULL DEFAULT 'user'
+    authorship TEXT NOT NULL DEFAULT 'user',
+    is_current INTEGER NOT NULL DEFAULT 1,
+    revision_hash TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_atoms_source ON source_atoms(source_id, seq);
 
@@ -242,6 +244,15 @@ class Database:
 
     def initialize(self) -> None:
         connection = self.connect()
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE name='schema_meta'").fetchone():
+            previous = connection.execute(
+                "SELECT value FROM schema_meta WHERE key='schema_version'"
+            ).fetchone()
+            if previous and 0 < int(previous['value']) < SCHEMA_VERSION:
+                backup_path = self.path.with_name(self.path.name + f'.pre-v{SCHEMA_VERSION}.bak')
+                if not backup_path.exists():
+                    with sqlite3.connect(backup_path) as backup:
+                        connection.backup(backup)
         with connection:
             connection.executescript(SCHEMA)
             row = connection.execute(
@@ -256,6 +267,16 @@ class Database:
                 self._migrate_v1_to_v2(connection)
             if current < 3:
                 self._migrate_v2_to_v3(connection)
+            if current < 4:
+                columns = {r[1] for r in connection.execute('PRAGMA table_info(source_atoms)')}
+                if 'is_current' not in columns:
+                    connection.execute('ALTER TABLE source_atoms ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1')
+                if 'revision_hash' not in columns:
+                    connection.execute("ALTER TABLE source_atoms ADD COLUMN revision_hash TEXT NOT NULL DEFAULT ''")
+                connection.execute(
+                    "UPDATE source_atoms SET revision_hash=(SELECT content_hash FROM sources "
+                    "WHERE sources.id=source_atoms.source_id) WHERE revision_hash=''"
+                )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_atom_vectors_identity "
                 "ON atom_vectors(embedding_provider, embedding_model, "

@@ -105,7 +105,7 @@ SELECT a.id AS atom_id, a.source_id AS source_id, a.heading, a.text, a.authorshi
        a.recorded_at, a.event_time, a.seq,
        s.title, s.rel_path, s.uid AS source_uid, s.tags_json
 FROM source_atoms a JOIN sources s ON s.id = a.source_id
-WHERE s.is_present = 1 AND s.searchable = 1 AND a.authorship != 'derived'
+WHERE s.is_present = 1 AND s.searchable = 1 AND a.is_current = 1 AND a.authorship != 'derived'
 """
 
 _ATOM_SELECT_FTS = """
@@ -116,7 +116,7 @@ SELECT a.id AS atom_id, a.source_id AS source_id, a.heading, a.text, a.authorshi
 FROM source_atoms_fts
 JOIN source_atoms a ON a.id = source_atoms_fts.rowid
 JOIN sources s ON s.id = a.source_id
-WHERE s.is_present = 1 AND s.searchable = 1 AND a.authorship != 'derived'
+WHERE s.is_present = 1 AND s.searchable = 1 AND a.is_current = 1 AND a.authorship != 'derived'
 """
 
 
@@ -480,19 +480,9 @@ class VectorRetriever:
         _apply_common_filters(sql, params, query)
         rows = self.database.fetchall("\n".join(sql), params)
         scored: list[tuple[float, Any]] = []
+        vector_cache = self._cache_rows()
         for row in rows:
-            vector_row = self.database.fetchone(
-                """
-                SELECT embedding_dimension, embedding_text_hash, vector_json
-                FROM atom_vectors
-                WHERE atom_id=? AND embedding_provider=? AND embedding_model=?
-                  AND embedding_text_version=? AND embedding_dimension=?
-                """,
-                (
-                    int(row["atom_id"]), self.backend.provider, self.backend.model,
-                    self.text_version, query_dimension,
-                ),
-            )
+            vector_row = vector_cache.get(int(row['atom_id']))
             current_hash = embedding_text_hash(embedding_text(row))
             cached = self._cached_vector(vector_row, current_hash)
             if cached is None:
@@ -625,7 +615,7 @@ class APICrossEncoderReranker:
             """
             SELECT a.heading, a.text, s.title, s.tags_json
             FROM source_atoms a JOIN sources s ON s.id=a.source_id
-            WHERE a.id=? AND s.is_present=1 AND s.searchable=1
+            WHERE a.id=? AND s.is_present=1 AND s.searchable=1 AND a.is_current=1
             """,
             (atom_id,),
         )

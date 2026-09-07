@@ -129,7 +129,7 @@ class DiscoveryService:
         return raw, "heuristic"
 
     def run_scan(self, limit: int = 5) -> tuple[int, list[DiscoveryCandidate]]:
-        raw, source = self._engine_candidates(limit)
+        raw, source = self._engine_candidates(min(max(limit, 1) * 3, 30))
         scan_id = self.database.execute(
             "INSERT INTO discovery_scans(candidates_found, created_at) VALUES(?,?)",
             (len(raw), utc_now()),
@@ -137,7 +137,17 @@ class DiscoveryService:
         candidates: list[DiscoveryCandidate] = []
         now = utc_now()
         for item in raw:
+            if len(candidates) >= limit:
+                break
             early, recent = item["early"], item["recent"]
+            paused = self.database.fetchone(
+                "SELECT 1 FROM discoveries WHERE early_atom_id=? AND recent_atom_id=? AND "
+                "((status='snoozed' AND datetime(last_shown_at)>datetime('now','-7 days')) "
+                "OR review_verdict IN ('no_change','not_my_view')) LIMIT 1",
+                (early['atom_id'], recent['atom_id']),
+            )
+            if paused:
+                continue
             topic = str(item.get("topic") or "")
             discovery_id = self.database.execute(
                 """
@@ -190,6 +200,15 @@ class DiscoveryService:
                 )
             )
         return scan_id, candidates
+
+    def dismiss(self, discovery_id: int) -> dict[str, Any]:
+        if not self.database.fetchone('SELECT 1 FROM discoveries WHERE id=?', (discovery_id,)):
+            raise KeyError('发现候选不存在')
+        self.database.execute(
+            "UPDATE discoveries SET status='snoozed',last_shown_at=? WHERE id=?",
+            (utc_now(), discovery_id),
+        )
+        return {'discovery_id': discovery_id, 'snoozed_days': 7}
 
     def mark_shown(self, discovery_ids: list[int]) -> None:
         """呈现即计数：排序器的新颖度因子依赖展示历史。"""

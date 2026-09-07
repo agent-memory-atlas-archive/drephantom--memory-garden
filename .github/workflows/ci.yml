@@ -7,14 +7,17 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --frozen --dev
       - name: Lint
         run: uv run ruff check src tests scripts
       - name: Type check
@@ -28,5 +31,5 @@ jobs:
       - name: Upload eval artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: eval-artifacts
+          name: eval-artifacts-${{ matrix.os }}
           path: artifacts/evals/

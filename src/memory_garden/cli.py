@@ -96,7 +96,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("extract-snapshots", help="离线抽取立场快照（自动选择 LLM/确定性）")
     eval_disc = sub.add_parser("eval-discovery", help="合成库发现精度评测")
     eval_disc.add_argument("--output", default="artifacts/evals/discovery")
-    sub.add_parser("serve", help="启动本地 Web UI")
+    serve = sub.add_parser("serve", help="启动本地 Web UI")
+    serve.add_argument('--port', type=int, default=8766, help='本机监听端口')
     sub.add_parser("mcp", help="启动 MCP stdio 服务")
     sub.add_parser("verify-vault", help="校验同步幂等且 Vault 只读（哈希不变）")
 
@@ -353,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
 
         retriever = build_retriever(database, settings)
         classifier = None
-        if settings.llm_ready:
+        if settings.backend != 'local' and settings.llm_ready:
             from .llm import OpenAICompatibleClient
             from .snapshots import LLMChangeClassifier
 
@@ -376,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
         from .snapshots import DeterministicExtractor, LLMBatchExtractor, ensure_snapshots
 
         retriever = build_retriever(database, settings)
-        if settings.llm_ready:
+        if settings.backend != 'local' and settings.llm_ready:
             known = [
                 row["topic"]
                 for row in database.fetchall(
@@ -405,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
 
         from .web import create_app
 
-        uvicorn.run(create_app(settings), host="127.0.0.1", port=8766)
+        uvicorn.run(create_app(settings), host="127.0.0.1", port=args.port)
         return 0
 
     if args.command == "mcp":

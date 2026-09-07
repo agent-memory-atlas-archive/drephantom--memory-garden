@@ -1,10 +1,14 @@
 # Memory Garden — 个人认知回溯 Agent
 
-> **English TL;DR:** A personal cognitive-retrospect Agent over long-term Obsidian notes. It discovers when your stated views actually changed, verifies claims against read-only sources with citable evidence, and refuses to invent causal stories. Automated tests and reproducible evaluation code are included; the Quick Start runs offline on a bundled synthetic vault with no API key.
+> **English TL;DR:** A personal cognitive-retrospect Agent over long-term Obsidian notes. A language model interprets each turn, chooses read-only tools when personal evidence is needed, and responds in context. Source checks constrain its claims. Try the model-connected synthetic demo, or use the explicitly labeled offline template demo without an API key.
 
 面向个人长期 Obsidian 记录的**认知回溯 Agent**：主动发现观点、判断与选择发生变化的候选，
 用受限的只读工具核对原始来源、追踪时间区间内的经历并检验支持与反例；
-证据不足时向用户提问，而不是为用户虚构一个完整的因果故事。
+模型结合上下文决定这一轮应该查记录、比较观点，还是继续交流；证据不足时保留不确定性。
+
+例如，先问“我的自主判断有没有变化”，Agent 查询两端原话；接着问“为什么人的想法会变化”，
+模型可以直接讨论一般原因，不会因为出现“为什么”就重新要求用户补充当前看法。
+代码负责工具权限、预算、引用校验和用户判定边界，语言模型负责理解与回应。
 
 ```
  Obsidian Vault（只读访问，哈希校验）
@@ -56,7 +60,7 @@ Memory Garden 把发现拆成离线/在线两层，让语义比较成为一等�
    分类为措辞漂移/深化/真变化/并列新立场/语境性立场——只有真变化与并列新立场成为候选。
 3. **显式对比句（高精度信号）**："以前我以为…现在…"正则直取，作者亲口承认的变化直接成为候选。
 4. **评分限额（在线）**：候选分 = 变化置信度 × 主题重要度 × 新颖度（近 7 天展示过则降权）× 反应权重，
-   每周只打扰 3–5 条；呈现两端**原话+日期并排**，让差距自己说话，不解释因果。
+   每次只呈现 3–5 条；呈现两端**原话+日期并排**，让差距自己说话，不解释因果。
 5. **反应写回**：一键反应（属实/不是/无聊）直接写回该主题的排序权重，使后续候选排序逐步适应个人反馈。
 
 ## 工程验证
@@ -80,12 +84,32 @@ Memory Garden 把发现拆成离线/在线两层，让语义比较成为一等�
 判定按钮与"还没确定的"提示只在**结论型回答**（追溯到的变化/明确不构成变化）后出现；
 开放式交流类的回复不会被一排表单打断。
 
-首次使用无需修改仓库文件：在网页右上角“设置”中填写 Vault 路径与 API Key
-（仅保存在本机 `.local/settings.json`，且已由 `.gitignore` 排除），重启一次即可生效。
+助手名称与模型连接可在网页右上角“设置”中保存，普通模式写入本机 `.local/settings.json`
+（已由 `.gitignore` 排除），重启后生效。两种演示模式使用独立数据库和设置；Agent 演示会调用生成模型。
+连接自己的笔记前，在 `.env` 配置 `MG_VAULT_PATH`，并为它设置独立的 `MG_DATABASE_PATH`
+（例如 `.local/my-garden.db`），然后启动普通模式。每个数据库绑定一个 Vault；切换笔记库时
+也要使用另一个数据库，避免旧索引、历史对话和新笔记混在一起。
 
 ## Quick start
 
-没有可用 Vault 时也可运行：设置 `MG_PUBLIC_DEMO_MODE=true` 后，`init` 会强制使用仓库内的合成 Vault（`evals/cognitive_mvp_vault`），无需 API Key，且可离线复现。
+Windows 配好生成连接后，双击 **`start-agent-demo.bat`**，打开 `http://127.0.0.1:8876`。
+首页应显示“Agent 演示 · 模型名 · 合成记录”。使用独立的 `.local/agent-demo.db`，
+仅索引仓库合成笔记，不读取普通模式或旧离线演示的历史对话。新输入的问题、此演示的对话上下文和
+实际选取的合成片段会发给已配置的生成模型；Embedding 与 Rerank 保持本地。
+
+尚未配置 API 时可双击 `start-demo.bat`，体验明确标为“离线演示 · 模板对照”的流程。
+它使用 `.local/demo.db`、关闭全部模型连接，只用于观察界面和证据链，不能展示自由对话能力。
+两种启动方式使用同一端口，启动另一种之前先关闭当前服务。
+
+网页从“找一条回看线索”开始，也可以直接写下问题。回答旁的来源按钮可以核对原话、时间与位置；
+“补充或修正”会记住你的说法，“这条暂时不看”只暂缓该线索七天，不改变观点判定。
+更新笔记后可在设置中“更新本地索引”，新回看使用当前版本，历史回答保留当时的片段。
+
+这轮产品取舍与尚未验证的边界见 [产品设计说明](docs/PRODUCT_DESIGN.md)。
+
+没有可用 Vault 时也可运行：`MG_PUBLIC_DEMO_MODE=true` 强制使用仓库内的合成 Vault
+（`evals/cognitive_mvp_vault`）；默认离线。另设 `MG_DEMO_USE_MODEL=true` 才会使用已配置的生成连接。
+请求模型模式但连接不可用时明确报错，不会用模板伪装模型回答。
 
 ```powershell
 git clone https://github.com/drephantom/memory-garden.git
@@ -182,7 +206,7 @@ cross-encoder 排名替换 RRF 排名，`rank_fusion` 则合并两种名次。�
 ```
 src/memory_garden/
   config.py      设置加载（进程环境 > .env）
-  db.py          SQLite schema v3 + 无损增量迁移（Embedding 缓存身份/来源/认知数据）
+  db.py          SQLite schema v4 + 升级前备份（保留历史原子、区分当前版本）
   importer.py    只读同步：哈希修订链、移动身份稳定、event_time/recorded_at 分离、作者归属
   retrieval.py   统一工厂：BM25 / 字符n-gram / mock或API Embedding / RRF 混合
   llm.py         OpenAI 兼容客户端（工具循环/embeddings/rerank/重试/密钥脱敏）
@@ -192,7 +216,10 @@ src/memory_garden/
   cognitive.py   发现扫描持久化、呈现追踪、一键反应、六选一判定记忆
   evaluation.py  协议消融评测 / 检索与重排对照 / 发现精度
   mcp_server.py  MCP stdio 服务（工具与内部循环同源）
-  web.py         极简本地 UI（FastAPI 单文件，无前端构建链）
+  web.py         本机 API、同步与配置校验
+  page.html      回看首页（settings.html/history.html 为设置与历史）
+  static/        本地 CSS/JavaScript，无前端构建链、无外部 CDN
+  budget.py      工具与网络重试共享的协作式时间预算
   cli.py         init/sync/ask/discover/extract-snapshots/eval-*/serve/mcp/verify-vault
 tests/           自动化测试（含 Embedding 缓存、API cross-encoder、评估口径、数据集隔离与三入口统一）
 evals/           脱敏合成 Vault 与公开回归用例；私有 golden 不入库

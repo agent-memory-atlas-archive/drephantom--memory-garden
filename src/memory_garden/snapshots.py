@@ -199,7 +199,7 @@ class LLMBatchExtractor:
 
 def ensure_snapshots(database: Database, extractor: SnapshotExtractor) -> dict[str, int]:
     """为缺失快照的原子补齐（按 schema 版本）。内容变化的原子 id 本身会变，
-    旧快照随原子级联删除；schema 升级时调用方负责删除旧版本快照后重跑。"""
+    历史快照保留以供追溯，但不再参加当前候选发现。"""
     missing = database.fetchall(
         """
         SELECT a.id AS atom_id, a.text, a.authorship, a.heading,
@@ -208,7 +208,7 @@ def ensure_snapshots(database: Database, extractor: SnapshotExtractor) -> dict[s
         FROM source_atoms a JOIN sources s ON s.id = a.source_id
         LEFT JOIN stance_snapshots v
                ON v.atom_id = a.id AND v.snapshot_schema_version = ?
-        WHERE s.is_present = 1 AND s.searchable = 1 AND v.atom_id IS NULL
+        WHERE s.is_present = 1 AND s.searchable = 1 AND a.is_current = 1 AND v.atom_id IS NULL
         """,
         (SNAPSHOT_SCHEMA_VERSION,),
     )
@@ -354,6 +354,11 @@ _CONTRAST_RE = re.compile(
 )
 
 
+def contains_explicit_contrast(text: str) -> bool:
+    """只标识文字中出现的前后对照，不据此确认当前立场或变化原因。"""
+    return _CONTRAST_RE.search(text) is not None
+
+
 def find_contrast_sentences(database: Database, limit: int = 5) -> list[dict[str, Any]]:
     """显式对比句检测：正则直取 + 与检索索引相同的来源过滤。
 
@@ -365,7 +370,7 @@ def find_contrast_sentences(database: Database, limit: int = 5) -> list[dict[str
                COALESCE(a.event_time, a.recorded_at) AS moment,
                s.title, s.rel_path
         FROM source_atoms a JOIN sources s ON s.id = a.source_id
-        WHERE s.is_present = 1 AND s.searchable = 1 AND a.authorship = 'user'
+        WHERE s.is_present = 1 AND s.searchable = 1 AND a.is_current = 1 AND a.authorship = 'user'
         """
     )
     hits: list[dict[str, Any]] = []
@@ -442,7 +447,8 @@ class DiscoveryEngine:
             " s.rel_path, s.tags_json FROM stance_snapshots v"
             " JOIN source_atoms a ON a.id = v.atom_id JOIN sources s ON s.id = a.source_id"
             " WHERE v.has_stance = 1 AND v.is_own_view = 1"
-            " AND s.is_present = 1 AND COALESCE(a.event_time, a.recorded_at) IS NOT NULL"
+            " AND s.is_present = 1 AND s.searchable=1 AND a.is_current=1"
+            " AND COALESCE(a.event_time, a.recorded_at) IS NOT NULL"
         )
         params: list[Any] = []
         if topics:
@@ -504,7 +510,10 @@ class DiscoveryEngine:
         terms = topic_terms(text)
         if not terms:
             return []
-        rows = self.database.fetchall("SELECT DISTINCT topic FROM stance_snapshots")
+        rows = self.database.fetchall(
+            "SELECT DISTINCT v.topic FROM stance_snapshots v JOIN source_atoms a ON a.id=v.atom_id "
+            "JOIN sources s ON s.id=a.source_id WHERE a.is_current=1 AND s.is_present=1 AND s.searchable=1"
+        )
         return [
             str(row["topic"])
             for row in rows

@@ -176,7 +176,8 @@ class CognitiveTools:
 
     def _snapshot_count(self) -> int:
         row = self.database.fetchone(
-            "SELECT COUNT(*) AS n FROM stance_snapshots WHERE has_stance=1"
+            "SELECT COUNT(*) AS n FROM stance_snapshots v JOIN source_atoms a ON a.id=v.atom_id "
+            "JOIN sources s ON s.id=a.source_id WHERE v.has_stance=1 AND a.is_current=1 AND s.is_present=1"
         )
         return int(row["n"]) if row else 0
 
@@ -248,7 +249,7 @@ class CognitiveTools:
             """
             SELECT a.id, a.text, a.heading, COALESCE(a.event_time, a.recorded_at) AS moment,
                    s.title, s.tags_json FROM source_atoms a JOIN sources s ON s.id=a.source_id
-            WHERE s.is_present=1 AND s.searchable=1 AND a.authorship='user'
+            WHERE s.is_present=1 AND s.searchable=1 AND a.is_current=1 AND a.authorship='user'
               AND COALESCE(a.event_time, a.recorded_at) IS NOT NULL
             """
         )

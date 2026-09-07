@@ -163,7 +163,7 @@ def test_api_provider_request_format_and_dimension_validation(
         def __exit__(self, *args: Any) -> None:
             return None
 
-        def post(self, url: str, *, headers: dict[str, str], json: dict[str, Any]):
+        def post(self, url: str, *, headers: dict[str, str], json: dict[str, Any], timeout: float | None = None):
             calls.append({"url": url, "headers": headers, "json": json})
             return Response()
 
@@ -342,7 +342,7 @@ def test_dedicated_embedding_connection_does_not_reuse_chat_provider(
         def __exit__(self, *args: Any) -> None:
             return None
 
-        def post(self, url: str, *, headers: dict[str, str], json: dict[str, Any]):
+        def post(self, url: str, *, headers: dict[str, str], json: dict[str, Any], timeout: float | None = None):
             calls.append({"url": url, "headers": headers, "json": json})
             return Response()
 
@@ -398,7 +398,7 @@ def test_api_cross_encoder_request_format_and_result_mapping(
         def __exit__(self, *args: Any) -> None:
             return None
 
-        def post(self, url: str, *, headers: dict[str, str], json: dict[str, Any]):
+        def post(self, url: str, *, headers: dict[str, str], json: dict[str, Any], timeout: float | None = None):
             calls.append({"url": url, "headers": headers, "json": json})
             return Response()
 
@@ -673,4 +673,4 @@ def test_v2_vector_table_migrates_losslessly(tmp_path: Path) -> None:
     assert row["vector_json"] == legacy_vector
     assert migrated.fetchone(
         "SELECT value FROM schema_meta WHERE key='schema_version'"
-    )["value"] == "3"
+    )["value"] == "4"

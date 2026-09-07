@@ -1,6 +1,6 @@
 # Memory Garden 架构
 
-更新：2026-09-02。本文描述当前实现；生成的评测结果与私有 golden 仅保存在本机。
+更新：2026-09-07。本文描述当前实现；生成的评测结果与私有 golden 仅保存在本机。
 
 ## 1. 系统边界
 
@@ -37,7 +37,7 @@ Obsidian Vault（只读访问；MG_PUBLIC_DEMO_MODE=true 时强制指向仓库�
   内容变化生成不可变修订；消失文件标 `is_present=0`。
 - **作者归属**：frontmatter 声明 > `content_origin/generated_by` > 文件名/标题约定（`AI草稿*`、`引用*`）；
   原子级引用块（blockquote / `[引用]`）降级为 `quoted`。引用/AI 文本永不冒充用户立场。
-- **schema 演进**：v3 增量迁移；v2 `atom_vectors(atom_id, dim, vector_json)` 原值无损复制为
+- **schema 演进**：v4 增量迁移（升级前 SQLite 备份，历史原子保留）；v2 `atom_vectors(atom_id, dim, vector_json)` 原值无损复制为
   `legacy/unknown-v2` 身份，当前 provider 不会读取，按需生成带完整身份的新缓存；
   快照表自带 `snapshot_schema_version`，抽取逻辑变更可整版重建。
 
@@ -67,7 +67,7 @@ Rerank `api` 独立要求 `MG_ALLOW_CLOUD_RERANK=true`、Base URL、API Key 与�
 两组连接与 `MG_LLM_*` 生成连接分离并采用 fail-closed；任一专用 Base URL/Key 缺失时拒绝构建，
 不回退到生成模型 provider。
 Embedding payload 包含查询文本及各原子的标题、标题层级、标签、正文；Rerank payload 包含查询及 RRF
-候选的同一规范文本。Web 空库启动只同步 Vault；本地后端可自动建缓存，云端缓存必须由后续明确
+候选的同一规范文本。Web 每次启动只读同步 Vault；本地后端可自动建缓存，云端缓存必须由后续明确
 检索或设置页二次确认操作触发，不在启动阶段批量上传，Rerank 也只在实际查询时调用。
 
 ## 4. 立场快照与发现引擎（v2 核心）
@@ -80,28 +80,42 @@ Embedding payload 包含查询文本及各原子的标题、标题层级、标�
 - **显式对比句**：`(以前|过去|曾经|原本|当初)…[，,]…(现在|如今|这两年|最近)` 正则直取，
   置信度 0.85、`signal_type=explicit_contrast`，主题取笔记标签。
 - **评分**：`变化置信度 × 主题重要度(快照数归一) × 新颖度(7天内展示过→0.3) × 反应权重(属实×1.15/不是×0.6/无聊×0.8, 上限2.0)`。
-- **呈现**：限额 3–5 条/周；两端原话+日期并排；对收到负反馈的候选降低排序权重，避免重复呈现。
+- **呈现**：每次呈现 3–5 条；暂缓的相同原子对七天不再呈现；两端原话+日期并排；对收到负反馈的候选降低排序权重，避免重复呈现。
 
 ## 5. Agent Harness
 
+- **模型决定用途**：真实 Provider 先用 `plan_turn` 返回 `conversation/source_lookup/cognitive_trace/discovery`。
+  模型根据最近对话补全检索主题；不先用关键词把每句话都当作回溯问题。
+  一般交流另用一次有预算的调用生成回应，只带用户原话和解析后的话题，避免反复采信旧助手的个人解释。
+- **模型提交回应**：工具循环暴露 `finish_response`，仅接受单独调用中的 `reply` 作为最终正文；
+  不保存或显示伴随工具请求的过程文字。原文检索只要求相应来源；前后对照要求检索、时间线和可用端点配对。
+  只有核对个人变化原因时，才额外要求区间事件与 support/challenge 双侧检索。
 - **预算四护栏**：最大步数(10)/工具调用(16)/整体时长/重复调用(>2 拒绝)；无进展 = 连续出错观察。
+  用途决定、预算耗尽后的最终生成和引用修复均计入模型步数；步骤耗尽不能额外调用模型。
 - **协议合规**：批量 tool_calls 的每个 id 必须有应答（否则 provider 400）；
   预算耗尽 → 注入"立即基于已有观察作答"强制收敛，而不是静默丢弃。
-- **引用守卫**：`[A{id}]` 必须属于本轮工具真实返回；越界 → 一次无工具改写；仍失败 → 本地确定性降级。
-  呈现层改写后再次检查且必须保持相同引用集合，避免安全草稿在最后一步丢失/新增引用。
-- **证据计划守卫**：主题时间线出现至少两个端点时，最终回答前必须完成候选配对、区间事件和
-  support/challenge 双侧检索；缺失时允许一次补工具，仍不完整则本地降级。工具顺序仍由模型选择，
-  证据完整性由 Harness 确定性检查。
+- **引用守卫**：`[A{id}]` 必须属于本轮工具真实返回；越界时在剩余预算内允许一次修复，仍失败明确报告。
+  真实主流程不另做无预算的文风改写；编号校验不等于自然语言主张已被语义验证。
+- **证据计划守卫**：按本轮用途检查最低证据步骤；缺失时最多允许一次补工具。
+  工具选择与顺序由模型决定，权限和证据完整性由 Harness 检查。
 - **双侧检索落地**：`stance=challenge` 不只是返回标签；它加入反例/例外/转折查询信号，并对显式
   反例标签作稳定候选重排。该信号只决定核对顺序，不直接把候选判成反证。
 - **不可信上下文**：工具观察与 Vault 文本都只作为数据；其中的提示注入文字不能改变系统规则或触发指令。
 - **隐私遥测**：生成模型收到工具观察、Embedding 上传原子文本或 Rerank 上传候选文本时，
   本轮运行记录 `private_vault_sent=1`；纯本地与 scripted provider 保持 0。
-- **降级链**：provider 错误/预算耗尽/引用失败 → `local_fallback`（同一投影协议，backend 可审计）。
-- **运行时工具收缩**：主题明确（主题词存在且不全为发现类元词）→ 不注册 `discover_cognitive_shifts`；
-  这是注册表级收缩，不依赖提示词约束。
+- **失败行为**：真实主流程的 provider 错误、预算耗尽或引用失败 → `model_unavailable`，保留消息并告知未完成。
+  确定性模板与旧的本地降级分支只用于显式离线演示/旧脚本评测，不冒充模型成功。
+- **运行时工具收缩**：真实主流程仅在模型判为 discovery 且调用方允许时注册 `discover_cognitive_shifts`；
+  本地演示仍用确定性主题判断。
 - **结构化答案**：`CognitiveAnswer`（端点/区间/正反例/未知项/置信度/最多一问）；
   `traced_change` 必须双端点+可定位引用；较近端点固定 `latest_memory_candidate`。
+
+DeepSeek 的强制结构化工具调用显式使用非思考模式；其他 OpenAI 兼容连接不发送 DeepSeek 专用参数。
+接口依据：[DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 与
+[Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)。
+
+`MG_PUBLIC_DEMO_MODE=true` 固定合成 Vault；`MG_DEMO_USE_MODEL=true` 另选 `.local/agent-demo.db`
+及独立设置并保留生成连接，默认则使用离线 `.local/demo.db`。两者均禁用云端 Embedding/Rerank。
 
 ## 6. 判定与反应（用户是唯一 ground truth）
 
@@ -136,5 +150,5 @@ Embedding payload 包含查询文本及各原子的标题、标题层级、标�
   `APICrossEncoderReranker` 通过兼容 `/rerank` 的接口调用真实模型，可比较替换排序与
   名次再融合；链路跑通不等于排序效果提升，指标必须分开验证；
 - FTS5 trigram 而非 jieba 分词索引：免维护词典、中文召回稳，短词缺口由混合检索第二路兜底；
-- Web UI 单文件 FastAPI + 内联 HTML：产品面刻意小，核心是 CLI/API/MCP 三通道；
+- Web UI 使用 FastAPI + 独立 HTML/CSS/JavaScript：产品面刻意小，核心是 CLI/API/MCP 三通道；
 - MCP 2.x `MCPServer`：工具经同一 `ToolRegistry` 暴露，使各入口共享相同的边界规则。

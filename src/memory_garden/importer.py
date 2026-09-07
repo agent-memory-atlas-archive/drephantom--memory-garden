@@ -20,6 +20,7 @@ from typing import Any
 from .db import Database, utc_now
 
 SKIP_DIRS = {".obsidian", ".trash", ".git", ".venv", "node_modules"}
+IMPORTER_VERSION = 'v2-complete-chunks'
 
 _DATE_RE = re.compile(r"\b(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})")
 _WECHAT_HEADER_RE = re.compile(r"^###\s+(20\d{2}-\d{2}-\d{2})\s+(\d{2}:\d{2})")
@@ -168,20 +169,30 @@ def _chunk_markdown(body: str, doc_event_time: str | None, authorship: str) -> l
     start_line = 1
 
     def flush(end_line: int) -> None:
-        text = "\n".join(buffer).strip()
-        if not text:
-            return
-        atom_authorship = "quoted" if _looks_like_blockquote(text) else authorship
-        atoms.append(
-            ParsedAtom(
-                text=text[:4000],
-                heading=heading,
-                line_start=start_line,
-                line_end=end_line,
-                event_time=doc_event_time,
-                authorship=atom_authorship,
-            )
-        )
+        # 长章节按行累积切分；长单行继续分段，正文尾部不能被静默截掉。
+        chunk: list[str] = []
+        first = last = start_line
+        size = 0
+        def emit() -> None:
+            text = '\n'.join(chunk).strip()
+            if text:
+                atoms.append(ParsedAtom(
+                    text=text, heading=heading, line_start=first, line_end=last,
+                    event_time=doc_event_time,
+                    authorship='quoted' if _looks_like_blockquote(text) else authorship,
+                ))
+        for line_no, line in enumerate(buffer, start=start_line):
+            for offset in range(0, max(1, len(line)), 2000):
+                part = line[offset:offset+2000]
+                if chunk and size+len(part)+1 > 2000:
+                    emit()
+                    chunk, size = [], 0
+                if not chunk:
+                    first = line_no
+                chunk.append(part)
+                size += len(part)+1
+                last = line_no
+        emit()
 
     for index, line in enumerate(body.splitlines(), start=1):
         if line.startswith("#"):
@@ -216,15 +227,10 @@ def parse_wechat_document(rel_path: str, text: str) -> ParsedDocument | None:
             return
         quoted = body.startswith("[引用]")
         atoms_authorship = "quoted" if quoted else doc.authorship
-        doc.atoms.append(
-            ParsedAtom(
-                text=body[:4000],
-                line_start=start_line,
-                line_end=end_line,
-                event_time=current_time,
-                authorship=atoms_authorship,
-            )
-        )
+        for atom in _chunk_markdown('\n'.join(buffer), current_time, atoms_authorship):
+            atom.line_start += start_line - 1
+            atom.line_end += start_line - 1
+            doc.atoms.append(atom)
 
     for index, line in enumerate(lines, start=1):
         match = _WECHAT_HEADER_RE.match(line.strip())
@@ -266,7 +272,8 @@ def iter_markdown_paths(vault_path: Path) -> list[tuple[Path, str]]:
 
 
 def parse_markdown_document(path: Path, relative_path: str, text: str) -> ParsedDocument:
-    frontmatter, body, _ = split_frontmatter(text)
+    normalized = text.replace('\r\n', '\n')
+    frontmatter, body, body_offset = split_frontmatter(normalized)
     title = str(frontmatter.get("title") or "") or relative_path.rsplit("/", 1)[-1].removesuffix(".md")
     doc = ParsedDocument(
         rel_path=relative_path,
@@ -289,6 +296,10 @@ def parse_markdown_document(path: Path, relative_path: str, text: str) -> Parsed
                 ParsedAtom(text=body.strip()[:4000], line_start=1, line_end=1,
                            event_time=doc.event_time, authorship=doc.authorship)
             ]
+        line_offset = normalized[:body_offset].count('\n')
+        for atom in doc.atoms:
+            atom.line_start += line_offset
+            atom.line_end += line_offset
     return doc
 
 
@@ -308,7 +319,18 @@ class VaultSyncService:
         self.vault_path = vault_path
 
     def sync(self) -> dict[str, Any]:
+        if not self.vault_path.is_dir():
+            raise ValueError('Vault 笔记库路径不存在或不是目录，请先检查数据设置。')
+        root = str(self.vault_path.resolve())
+        bound = self.database.fetchone("SELECT value FROM schema_meta WHERE key='vault_root'")
+        if bound and os.path.normcase(str(bound['value'])) != os.path.normcase(root):
+            raise ValueError('此数据库已绑定另一个 Vault；请为新笔记库使用独立数据库。')
+        self.database.execute(
+            "INSERT OR IGNORE INTO schema_meta(key, value) VALUES('vault_root', ?)", (root,)
+        )
         vault_hash = vault_markdown_hash(self.vault_path)
+        parser = self.database.fetchone("SELECT value FROM schema_meta WHERE key='importer_version'")
+        refresh = not parser or parser['value'] != IMPORTER_VERSION
         last = self.database.fetchone(
             "SELECT vault_hash FROM sync_runs ORDER BY id DESC LIMIT 1"
         )
@@ -316,8 +338,8 @@ class VaultSyncService:
             "files_seen": 0, "files_added": 0, "files_changed": 0,
             "files_removed": 0, "atoms_total": 0,
         }
-        if last and last["vault_hash"] == vault_hash:
-            row = self.database.fetchone("SELECT COUNT(*) AS n FROM source_atoms")
+        if last and last["vault_hash"] == vault_hash and not refresh:
+            row = self.database.fetchone("SELECT COUNT(*) AS n FROM source_atoms WHERE is_current=1")
             return {"changed": False, "vault_hash": vault_hash, **counts,
                     "atoms_total": int(row["n"]) if row else 0}
 
@@ -333,11 +355,15 @@ class VaultSyncService:
             present_uids.add(doc_uid)
             is_new = self._is_new(doc_uid)
             with self.database.transaction() as connection:
-                self._upsert_document(connection, doc, doc_uid, doc_hash)
+                self._upsert_document(connection, doc, doc_uid, doc_hash, refresh=refresh)
             counts["files_added" if is_new else "files_changed"] += 1
             counts["atoms_total"] += len(doc.atoms)
 
         with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO schema_meta(key,value) VALUES('importer_version',?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (IMPORTER_VERSION,),
+            )
             for row in connection.execute(
                 "SELECT uid FROM sources WHERE is_present=1"
             ).fetchall():
@@ -373,7 +399,8 @@ class VaultSyncService:
         ) is None
 
     def _upsert_document(
-        self, connection: sqlite3.Connection, doc: ParsedDocument, uid: str, content_hash: str
+        self, connection: sqlite3.Connection, doc: ParsedDocument, uid: str, content_hash: str,
+        *, refresh: bool = False,
     ) -> None:
         existing = connection.execute(
             "SELECT id, content_hash FROM sources WHERE uid=?", (uid,)
@@ -388,7 +415,7 @@ class VaultSyncService:
             "UPDATE source_revisions SET last_seen_at=? WHERE source_uid=? AND content_hash=?",
             (now, uid, content_hash),
         )
-        if existing and existing["content_hash"] == content_hash:
+        if existing and existing["content_hash"] == content_hash and not refresh:
             connection.execute(
                 "UPDATE sources SET is_present=1, rel_path=? WHERE id=?",
                 (doc.rel_path, existing["id"]),
@@ -407,13 +434,13 @@ class VaultSyncService:
                  existing["id"]),
             )
             source_id = int(existing["id"])
-            # FTS 是无外键的影子表，必须与原子同删，否则 rowid 复用会触发唯一冲突
+            # 历史原子保留供既有发现、判定和引用追溯；仅从当前检索中撤下。
             connection.execute(
                 "DELETE FROM source_atoms_fts WHERE rowid IN"
                 " (SELECT id FROM source_atoms WHERE source_id=?)",
                 (source_id,),
             )
-            connection.execute("DELETE FROM source_atoms WHERE source_id=?", (source_id,))
+            connection.execute("UPDATE source_atoms SET is_current=0 WHERE source_id=?", (source_id,))
         else:
             cursor = connection.execute(
                 """
@@ -427,28 +454,29 @@ class VaultSyncService:
                  content_hash),
             )
             source_id = int(cursor.lastrowid or 0)
-        self._insert_atoms(connection, source_id, doc)
+        self._insert_atoms(connection, source_id, doc, content_hash)
 
     def _insert_atoms(
-        self, connection: sqlite3.Connection, source_id: int, doc: ParsedDocument
+        self, connection: sqlite3.Connection, source_id: int, doc: ParsedDocument, revision_hash: str
     ) -> None:
         tags_text = " ".join(doc.tags)
         for seq, atom in enumerate(doc.atoms):
-            atom_uid = "atom_" + sha256_text(f"{doc.rel_path}:{seq}:{atom.text[:200]}")[:24]
-            cursor = connection.execute(
+            atom_uid = "atom_" + sha256_text(f"{source_id}:{revision_hash}:{IMPORTER_VERSION}:{seq}")[:24]
+            connection.execute(
                 """
                 INSERT INTO source_atoms(source_id, uid, seq, heading, text, line_start,
-                    line_end, recorded_at, event_time, authorship)
-                VALUES(?,?,?,?,?,?,?,?,?,?)
+                    line_end, recorded_at, event_time, authorship, revision_hash)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(uid) DO UPDATE SET is_current=1
                 """,
                 (source_id, atom_uid, seq, atom.heading, atom.text, atom.line_start,
-                 atom.line_end, doc.recorded_at, atom.event_time, atom.authorship),
+                 atom.line_end, doc.recorded_at, atom.event_time, atom.authorship, revision_hash),
             )
             # 检索文本 = 标题 + 标题层级 + 标签 + 正文；atom.text 本身保持原文
             search_text = f"{doc.title}\n{atom.heading}\n{tags_text}\n{atom.text}"
             connection.execute(
                 "INSERT INTO source_atoms_fts(rowid, text) VALUES(?, ?)",
-                (int(cursor.lastrowid or 0), search_text),
+                (int(connection.execute('SELECT id FROM source_atoms WHERE uid=?', (atom_uid,)).fetchone()[0]), search_text),
             )
 
 

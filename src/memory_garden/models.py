@@ -1,6 +1,6 @@
 """认知回溯答案契约：自然语言回答之外，强制附带可审计的结构化结果。
 
-四类回答：traced_change（已追溯变化）/ no_clear_change / insufficient_evidence / clarification_needed。
+回答包括回溯结论、证据不足/澄清，以及不作结论的 conversation（回应、补充、暂停）。
 关键约束：
 - traced_change 必须同时具备早期端点与较近端点，且可定位引用；
 - 较近记录永远标注 latest_memory_candidate，不冒充当前观点；
@@ -15,7 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 ANSWER_TYPES = Literal[
-    "traced_change", "no_clear_change", "insufficient_evidence", "clarification_needed"
+    "traced_change", "no_clear_change", "insufficient_evidence", "clarification_needed", "conversation", "source_answer"
 ]
 
 
@@ -44,6 +44,13 @@ class EvidenceItem(BaseModel):
     citations: list[SourceCitation] = Field(default_factory=list)
 
 
+class DialogueState(BaseModel):
+    """只属于当前对话的状态；用户补充不自动升级为长期判定或 Vault 来源。"""
+    topic_query: str = ""
+    phase: Literal["awaiting_current_view", "reflecting", "paused"] = "reflecting"
+    current_statement: str | None = None
+
+
 class CognitiveAnswer(BaseModel):
     answer_type: ANSWER_TYPES
     summary: str
@@ -57,6 +64,7 @@ class CognitiveAnswer(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     question_to_user: str | None = None
     citations: list[SourceCitation] = Field(default_factory=list)
+    dialogue: DialogueState | None = None
 
     @property
     def abstained(self) -> bool:
