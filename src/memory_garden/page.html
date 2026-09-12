@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{NAME}} · Memory Garden</title><link rel="icon" type="image/svg+xml" href="/static/favicon.svg"><link rel="stylesheet" href="/static/garden.css"><script src="/static/workspace.js" defer></script><script src="/static/graph.js" defer></script><script src="/static/garden.js" defer></script></head>
+<body class="garden-page"><header class="site-header"><a class="brand" href="/" aria-label="Memory Garden 首页"><img class="brand-mark" src="/static/brand-mark.svg" width="40" height="40" alt="" aria-hidden="true"><span><strong class="brand-name">{{NAME}}</strong><small>MEMORY GARDEN</small></span></a><nav aria-label="主导航"><a href="/" class="active">新的回看</a><a href="/history">历史</a><a href="/import">导入</a><a href="/settings">设置</a></nav></header>
+<main id="main" class="main"><div class="workspace">
+<div class="context-bar"><span id="mode" class="mode">正在连接本地花园</span><a id="connect-model" href="/settings#generation" hidden>连接对话模型</a><span>原始笔记只读</span></div>
+<div id="notice" class="notice" role="status" hidden></div>
+<div class="vault-bar" aria-label="当前笔记库"><div><strong data-workspace-name>正在读取笔记库</strong><span data-workspace-status role="status"></span><a data-workspace-home href="/?view=map&amp;scope=global" hidden>回到当前笔记库</a></div><button type="button" data-connect-vault>连接笔记库</button></div>
+<section class="topic-workspace" aria-label="主题工作区">
+<form id="topic-form" class="topic-form"><label for="topic">正在回看</label><input id="topic" maxlength="120" placeholder="输入一个主题，如自主判断" autocomplete="off"><button type="submit" class="text-button">查看记录 <span aria-hidden="true">↗</span></button></form>
+<div class="view-tabs" role="tablist" aria-label="回看的方式"><button id="tab-chat" role="tab" aria-controls="panel-chat" aria-selected="true" data-view="chat">对话</button><button id="tab-timeline" role="tab" aria-controls="panel-timeline" aria-selected="false" tabindex="-1" data-view="timeline">时间线</button><button id="tab-map" role="tab" aria-controls="panel-map" aria-selected="false" tabindex="-1" data-view="map">关系图</button><button id="tab-memory" role="tab" aria-controls="panel-memory" aria-selected="false" tabindex="-1" data-view="memory">记忆</button></div>
+</section>
+<section id="panel-chat" class="tab-panel" role="tabpanel" aria-labelledby="tab-chat">
+<section id="welcome" class="welcome"><p class="eyebrow">属于你的，慢慢生长的记忆</p><h1>回看走过的路，<br>听听现在的自己。</h1><p class="intro">把当时写下的话放在一起，看看什么变了，什么仍然重要。<br class="desktop-break">不急着解释，也不用现在就有答案。</p>
+<div class="start-options"><button class="primary" id="discover">找一条回看线索 <span aria-hidden="true">↗</span></button><span class="quiet">没有想好问题，也可以从这里开始</span></div>
+<div class="seeds" aria-label="试着从一个主题开始"><span>或者，回看一个主题</span><button data-question="关于「自主判断」，我的想法以前到现在有没有变化？">自主判断</button><button data-question="关于「写作」，我的想法变过吗？">写作</button><button data-question="关于「独处」，我的想法变过吗？">独处</button></div>
+<p class="library-note" id="library"></p><div id="discoveries" class="discoveries" aria-live="polite"></div></section>
+<section id="chat" class="chat" aria-label="回看对话" aria-busy="false"></section></section>
+<section id="panel-timeline" class="tab-panel" role="tabpanel" aria-labelledby="tab-timeline" hidden><div class="panel-intro"><div><h2>沿着记录，慢慢回看</h2><p>日期描述记录与事件的先后，不能单独证明想法改变。</p></div><button class="refresh-map text-button" type="button">刷新记录</button></div><div id="timeline" aria-live="polite"></div></section>
+<section id="panel-map" class="tab-panel" role="tabpanel" aria-labelledby="tab-map" hidden>
+<div class="panel-intro"><div><h2>看看记录之间的联系</h2><p>从整个花园找到一条记录，再展开它附近的联系。实线只表示原文中明确写出的链接。</p></div><button class="refresh-map text-button" type="button">刷新记录</button></div>
+<div class="map-scope" role="group" aria-label="图的范围"><button id="map-local" type="button" aria-pressed="true">局部图</button><button id="map-global" type="button" aria-pressed="false">全局图</button></div>
+<form id="map-search" class="map-search" hidden><label for="map-query">搜索全局记录</label><input id="map-query" maxlength="120" placeholder="标题、标签或内容" autocomplete="off"><button type="submit">查找</button><button id="map-clear-query" type="button" class="text-button" hidden>清除筛选</button></form>
+<div id="map-focus" class="map-focus" hidden></div>
+<div id="map-meta" class="quiet" role="status"></div><div id="map-canvas" class="map-canvas" aria-label="笔记关系图"></div>
+<div id="map-selection" class="map-selection" aria-live="polite"></div>
+<details class="map-list-details"><summary>用列表浏览记录与链接</summary><div id="map-node-list" class="map-node-list"></div><section class="map-links"><h3>可核对的链接</h3><div id="map-edges"></div></section></details>
+</section>
+<section id="panel-memory" class="tab-panel" role="tabpanel" aria-labelledby="tab-memory" hidden><div class="panel-intro"><div><h2>由你确认，随时可以改变</h2><p>这里保存你对回溯结论的确认和修正。对话中的临时补充不会自动成为长期记忆。</p></div><button id="refresh-memory" type="button" class="text-button">刷新记忆</button></div><label class="memory-filter"><input id="memory-inactive" type="checkbox"> 显示已撤回或被后续修正替代的记忆</label><div id="memory-list" aria-live="polite"></div><div class="history-pagination"><button id="memory-more" type="button" hidden>查看更早的记忆</button></div></section>
+<aside id="evidence-dock" class="evidence-dock" aria-labelledby="evidence-heading" hidden><div class="evidence-heading"><div><p class="eyebrow">留在手边，随时核对</p><h2 id="evidence-heading">原文对照</h2></div><button id="clear-evidence" type="button" class="text-button">收起原文</button></div><div id="evidence-cards" class="evidence-cards"></div><div class="evidence-actions"><button id="ask-evidence" type="button">围绕这些记录继续问</button><p class="quiet">最多并排阅读两条。对话引用保留当时的片段，图中展示当前索引记录。</p></div></aside>
+</div></main>
+<footer class="composer-area"><div id="composer-scope" class="composer-scope" hidden></div><form id="composer" class="composer"><label class="sr-only" for="q">想回看的问题或想法</label><textarea id="q" rows="1" maxlength="6000" placeholder="想起了什么？从一句话开始就好。"></textarea><button id="send" class="primary" type="submit">发送 <span aria-hidden="true">↑</span></button></form><p class="composer-hint"><span id="draft-status">Enter 发送 · Shift + Enter 换行</span><span id="job-status">你可以不同意，也可以暂时不判断。</span></p></footer>
+</body></html>

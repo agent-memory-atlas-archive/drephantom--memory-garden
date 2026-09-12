@@ -1,0 +1,41 @@
+.venv/
+.local/
+.env
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+dist/
+*.egg-info/
+
+# 本地数据与个人材料
+evals/retrieval_goldens.real.json
+evals/retrieval_goldens.real.sha256
+artifacts/evals/
+docs/RESUME.md
+docs/EVALUATION_SUMMARY.md
+
+# 本机配置的变体；公开模板只保留无密钥的 example。
+.env.*
+!.env.example
+
+# 尚未公开的回答级实验：与本机 exclude 保持同一边界。
+# 临时隔离，不表示这些通用代码本身都是隐私；后续独立审查或移入外部实验目录。
+docs/RAG_ANSWER_EVAL_PROTOCOL.md
+evals/cognitive_mvp_vault/引用-提示注入.md
+evals/rag_answer_cases.json
+evals/rag_answer_cases.sha256
+scripts/run_rag_answer_eval.py
+scripts/run_real_agent_eval.py
+src/memory_garden/rag_evaluation.py
+
+# 用户指南之外的工作笔记保留在本地。
+docs/ARCHITECTURE.md
+docs/PRODUCT_DESIGN.md
+docs/RETRIEVAL_EVAL_PROTOCOL.md
+docs/MEMORY_HARNESS.md
+docs/ENGINEERING_REVIEW.md
+docs/DEVELOPMENT_CASEBOOK.md
+docs/DEVELOPMENT_WORKFLOW.md

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40" fill="none">
+  <title>Memory Garden · 年轮与新芽</title>
+  <g stroke="#365a47" stroke-width="2.4" stroke-linecap="round">
+    <path d="M28.72 14A14 14 0 1 0 31.16 27.79"/>
+    <path d="M24.51 17.54A8.5 8.5 0 1 0 25.99 25.91"/>
+    <path d="M20.68 20.75A3.5 3.5 0 1 0 21.29 24.2"/>
+    <path d="M28.72 14C29.55 13.13 30.12 12.1 30.45 10.66"/>
+  </g>
+  <path fill="#365a47" d="M30.18 11.1C29.7 6.38 32.24 3.15 36.94 3.1C37.14 7.68 34.64 10.65 30.18 11.1Z"/>
+</svg>
