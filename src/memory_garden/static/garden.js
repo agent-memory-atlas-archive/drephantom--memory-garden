@@ -407,9 +407,29 @@ function renderMap(data) {
     $('timeline').replaceChildren();
     if (!nodes.length) { emptyPanel($('timeline'), '这个主题还没有找到可展示的记录。可以换一个词，或在对话中说明你想回看的事情。'); return; }
     if (meta.omitted_nodes) $('timeline').append(node('p', 'quiet', '展示 ' + nodes.length + ' / ' + meta.total_candidates + ' 条相关记录，可以细化主题继续查看。'));
-    ordered.forEach(item => {
+    const overview = node('div', 'timeline-overview');
+    const dated = ordered.filter(item => /^\d{4}-\d{2}-\d{2}/.test(recordDate(item)));
+    overview.append(node('span', 'eyebrow', 'GROWING THROUGH TIME'), node('h3', '', '每一次落笔，留下一个坐标'), node('p', 'quiet', nodes.length + ' 条记录' + (dated.length ? ' · ' + dateLabel(recordDate(dated[0])) + ' — ' + dateLabel(recordDate(dated[dated.length - 1])) : '') + ' · 按先后排列，间距不代表时长'));
+    const yearNav = node('nav', 'timeline-years'); yearNav.setAttribute('aria-label', '跳转到记录年份');
+    overview.append(yearNav); $('timeline').append(overview);
+    let previousYear = null;
+    ordered.forEach((item, index) => {
+    const rawDate = recordDate(item), year = /^\d{4}-\d{2}-\d{2}/.test(rawDate) ? rawDate.slice(0, 4) : '日期待核对';
+    if (year !== previousYear) {
+      const marker = node('h3', 'timeline-year', year);
+      marker.tabIndex = -1;
+      $('timeline').append(marker);
+      yearNav.append(button(year, () => { marker.focus({preventScroll:true}); marker.scrollIntoView({block:'start', behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'}); }, 'timeline-year-link'));
+      previousYear = year;
+    }
     const citation = nodeCitation(item), entry = node('article', 'timeline-entry'), content = node('div', 'timeline-card');
-    entry.append(node('time', '', dateLabel(recordDate(item)) || '日期待核对'));
+    const date = node('time', 'timeline-date');
+    if (year !== '日期待核对') {
+      date.dateTime = dateLabel(rawDate);
+      date.append(node('span', 'timeline-month', rawDate.slice(5, 7) + ' 月'), node('strong', 'timeline-day', rawDate.slice(8, 10)));
+    } else date.textContent = '待核对';
+    entry.append(date);
+    content.append(node('span', 'timeline-sequence', '记录 ' + String(index + 1).padStart(2, '0')));
     const dateKind = item.source_kind === 'chat' && item.date_range ? sourceDates(item) : item.event_time ? '按事件时间排列' : item.recorded_at ? '按记录时间排列' : '没有明确日期';
     const owner = item.source_kind === 'chat' ? '聊天记录 · 逐条保留说话人' : authorshipLabels[item.authorship] || '作者待核对';
     content.append(button(item.title, () => openMapNode(item), 'timeline-title'), node('p', 'quiet', dateKind + ' · ' + owner), node('p', 'timeline-excerpt', citation.excerpt || '选择记录查看来源信息。'));
