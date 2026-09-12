@@ -14,6 +14,48 @@ Memory Garden 是一个在本机运行的个人记忆助手。连接 Obsidian �
 - **导入聊天片段**：预览文件或粘贴微信片段，确认哪些发言属于自己，再决定是否加入检索。也支持连接已运行的 QQ 导出服务。
 - **继续之前的对话**：历史页支持搜索与分页。离开页面不会取消已提交的回答请求。
 
+## Agent 如何工作
+
+Memory Garden 使用一个带只读工具的 Agent：先理解这一轮想聊什么，再决定是否查阅记录。回溯时，模型可以根据工具返回的证据继续查找，把原话、可能的解释和仍未确认的问题分开呈现。
+
+```mermaid
+flowchart TD
+    UI[Web / CLI / MCP] --> PLAN
+
+    subgraph HARNESS[单 Agent Harness]
+        PLAN[模型规划本轮意图] -->|普通交流| CHAT[结合对话直接回答]
+        PLAN -->|查找 / 回溯 / 探索| LOOP[模型选择下一步]
+        LOOP -->|调用工具| TOOLS[8 个只读认知工具]
+        TOOLS -->|原文与证据索引| LOOP
+        LOOP -->|形成回答| CHECK[引用与证据边界校验]
+        CHECK -->|需要修复且预算允许| LOOP
+        CHECK -->|通过| ANSWER[带来源的回答与待确认问题]
+        CHECK -->|无法完成| FAIL[明确说明未完成原因]
+    end
+
+    subgraph DATA[本地记录与检索]
+        STORE[Obsidian / 已确认聊天<br/>SQLite 原文修订与片段索引]
+        SEARCH[BM25 + 向量 → RRF<br/>可选重排]
+        STORE --> SEARCH
+    end
+    TOOLS -->|搜索| SEARCH
+    TOOLS -->|读取原文 / 时间线等| STORE
+
+    subgraph MEMORY[两层记忆]
+        CONTEXT[原始对话 → 提取式工作上下文]
+        LONG[用户确认的长期记忆<br/>可修正 / 可撤回]
+    end
+    CONTEXT --> PLAN
+    LONG --> LOOP
+```
+
+- **有边界的工具循环**：步数、调用次数、超时与重复调用共同限制执行；引用不合规时最多进行一次修复，并共用剩余预算。模型失败会明确报告，离线规则模式独立提供。
+- **可核对的检索**：通过 RRF 融合关键词与向量候选；默认向量使用本地哈希表示，可另行配置语义 Embedding 与重排服务。云端检索服务需单独启用，引用返回原始片段供用户核对。
+- **压缩上下文，保留原话**：长对话从原始消息中提取工作上下文，不反复压缩旧摘要；整个模型请求受字符预算约束。长期记忆只采用用户确认的判断，支持修正与撤回，按笔记库隔离。
+- **共享工具接口**：搜索、原文读取、主题时间线、变化候选、变化探索、区间事件、假设正反证据和用户判断，共 8 个只读工具；MCP 复用同一套工具实现。探索工具是否开放由本轮意图决定。
+
+实现入口：[Agent 循环](src/memory_garden/agent.py) · [工具](src/memory_garden/tools.py) · [混合检索](src/memory_garden/retrieval.py) · [工作上下文](src/memory_garden/context.py) · [记忆管理](src/memory_garden/memory.py)。使用说明见[对话与记忆](docs/MEMORY.md)。
+
 ## 开始使用
 
 需要 Python 3.12 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。
