@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">Memory Garden · 知微</title>
+  <desc id="desc">属于你的，慢慢生长的记忆花园。苔绿色的枝叶沿着时间节点生长。</desc>
+  <rect width="1200" height="300" rx="20" fill="#f6f5ef"/>
+  <circle cx="1070" cy="135" r="204" fill="#edf0e7"/>
+  <circle cx="1070" cy="135" r="150" fill="none" stroke="#dce3d5"/>
+  <circle cx="1070" cy="135" r="102" fill="none" stroke="#dce3d5"/>
+  <path d="M835 257C887 232 922 201 958 163S1036 100 1138 68" fill="none" stroke="#71876b" stroke-width="2"/>
+  <path d="M917 202C881 204 866 183 867 158C896 158 914 176 917 202ZM973 150C971 115 990 94 1018 90C1020 120 1000 143 973 150ZM1055 98C1045 69 1058 44 1082 34C1092 60 1080 86 1055 98Z" fill="#70856c"/>
+  <g fill="#f6f5ef" stroke="#71876b" stroke-width="2"><circle cx="875" cy="232" r="6"/><circle cx="958" cy="163" r="6"/><circle cx="1034" cy="111" r="6"/></g>
+  <circle cx="1138" cy="68" r="7" fill="#ba9b61"/>
+  <g font-family="Segoe UI, Microsoft YaHei, sans-serif">
+    <text x="58" y="65" fill="#71806f" font-size="13" letter-spacing="4">NOTES · TIME · UNDERSTANDING</text>
+    <text x="55" y="137" fill="#304b3c" font-size="49" font-weight="600">Memory Garden <tspan font-size="35" font-weight="400">· 知微</tspan></text>
+    <text x="58" y="187" fill="#52644f" font-size="22">属于你的，慢慢生长的记忆花园。</text>
+    <path d="M58 226H96" stroke="#ba9b61" stroke-width="2"/>
+    <text x="109" y="231" fill="#71806f" font-size="14">沿着记录，回看想法走过的路</text>
+  </g>
+</svg>

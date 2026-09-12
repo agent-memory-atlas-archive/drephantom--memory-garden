@@ -1,8 +1,72 @@
-# Memory Garden · 知微
+<p align="center">
+  <img src="docs/images/garden-header.svg" alt="Memory Garden · 知微 — 属于你的，慢慢生长的记忆花园。" width="100%">
+</p>
 
-属于你的，慢慢生长的记忆花园。
+<h1 align="center">Memory Garden · 知微</h1>
 
-Memory Garden 是一个在本机运行的个人记忆助手，核心是**认知回溯：沿着自己的原始记录，回看一个想法如何延续、改变，以及哪些经历可能与它有关**。连接 Obsidian 笔记库，或导入自己选择的聊天记录，就能围绕一个主题回看原话、浏览记录之间的联系，并修正助手对你的理解。
+<p align="center">沿着自己的记录，回看一个想法如何延续与改变。</p>
+
+<p align="center">
+  <a href="#开始使用">体验示例</a> ·
+  <a href="#认知回溯看见想法走过的路">认知回溯</a> ·
+  <a href="#agent-如何工作">工作原理</a> ·
+  <a href="#使用指南">使用指南</a>
+</p>
+
+<p align="center"><a href="LICENSE">MIT 开源</a> · 本机运行 · 原文可核对</p>
+
+Memory Garden 是一个个人记忆助手。连接 Obsidian 笔记库，或导入自己选择的聊天记录，围绕一个主题找回原话、比较前后表达，并修正助手对你的理解。
+
+![合成示例：沿时间线阅读记录，并在右侧核对原文](docs/images/timeline.png)
+
+<p align="center"><sub>实际界面 · 9 篇示例笔记 · 不含私人笔记 · 时间线间距不代表实际时长。</sub></p>
+
+| 回看原话 | 比较前后 | 修正理解 |
+| :--- | :--- | :--- |
+| 找回当时写下的表达，打开来源核对语境。 | 把同一主题的记录沿时间展开，保留变化的线索与反例。 | 认可、补充或撤回解释，让自己的判断保持可修正。 |
+
+> 自然对话需要连接生成模型；离线示例支持查找、规则对照和关系图浏览。连接云端模型时，相关片段可能发送至你配置的服务。
+
+## 开始使用
+
+需要 Python 3.12 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。
+
+```powershell
+git clone https://github.com/drephantom/memory-garden.git
+cd memory-garden
+uv sync --frozen
+```
+
+### 先体验示例
+
+Windows 双击 `start-demo.bat`，浏览器打开 <http://127.0.0.1:8876>。
+示例使用合成笔记，无需提供自己的笔记或 API Key。其他系统可按[示例体验指南](docs/DEMO.md)启动。
+
+离线模式支持查找、规则对照和浏览关系图。要展开自然对话，需要连接生成模型。
+
+### 使用自己的笔记
+
+```powershell
+Copy-Item .env.example .env
+```
+
+在 `.env` 中设置 `MG_VAULT_PATH` 为 Obsidian 笔记库的完整路径，然后启动：
+
+```powershell
+uv run memory-garden serve
+```
+
+打开 <http://127.0.0.1:8766>。Windows 也可以双击 `start-memory-garden.bat`。
+进入后，点击 **连接笔记库**，可以连接另一个本机文件夹或切换已连接的库。
+详细操作见[连接本地笔记库](docs/LOCAL_LIBRARIES.md)。
+
+### 连接对话模型
+
+打开 **设置 → 对话模型**，选择连接模型，填写服务地址、模型名称与 API Key。
+保存后重启当前使用的服务入口。
+
+模型连接后，问题、相关对话上下文和检索选出的记录片段可能发送到你配置的服务。
+每个新连接的笔记库默认使用本地模式，不会继承其他库的模型权限。
 
 ## 认知回溯：看见想法走过的路
 
@@ -50,12 +114,6 @@ Memory Garden 是一个在本机运行的个人记忆助手，核心是**认知�
 ## 在花园里回看
 
 通过示例笔记，体验时间线、关系图与原文对照。
-
-**时间线 · 像翻阅手记一样回看**
-
-按年份跳转，沿着月日坐标阅读片段，把需要核对的原文留在手边。叶片标记表示一条记录，时间线间距不代表实际时长。
-
-![合成示例：按年份浏览时间线，并在右侧核对原文](docs/images/timeline.png)
 
 **关系图 · 从一条记录走进它的联系**
 
@@ -112,47 +170,6 @@ flowchart TD
 - **共享工具接口**：搜索、原文读取、主题时间线、变化候选、变化探索、区间事件、假设正反证据和用户判断，共 8 个只读工具；MCP 复用同一套工具实现。探索工具是否开放由本轮意图决定。
 
 实现入口：[Agent 循环](src/memory_garden/agent.py) · [工具](src/memory_garden/tools.py) · [混合检索](src/memory_garden/retrieval.py) · [工作上下文](src/memory_garden/context.py) · [记忆管理](src/memory_garden/memory.py)。使用说明见[对话与记忆](docs/MEMORY.md)。
-
-## 开始使用
-
-需要 Python 3.12 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。
-
-```powershell
-git clone https://github.com/drephantom/memory-garden.git
-cd memory-garden
-uv sync --frozen
-```
-
-### 先体验示例
-
-Windows 双击 `start-demo.bat`，浏览器打开 <http://127.0.0.1:8876>。
-示例使用合成笔记，无需提供自己的笔记或 API Key。其他系统可按[示例体验指南](docs/DEMO.md)启动。
-
-离线模式支持查找、规则对照和浏览关系图。要展开自然对话，需要连接生成模型。
-
-### 使用自己的笔记
-
-```powershell
-Copy-Item .env.example .env
-```
-
-在 `.env` 中设置 `MG_VAULT_PATH` 为 Obsidian 笔记库的完整路径，然后启动：
-
-```powershell
-uv run memory-garden serve
-```
-
-打开 <http://127.0.0.1:8766>。Windows 也可以双击 `start-memory-garden.bat`。
-进入后，点击 **连接笔记库**，可以连接另一个本机文件夹或切换已连接的库。
-详细操作见[连接本地笔记库](docs/LOCAL_LIBRARIES.md)。
-
-### 连接对话模型
-
-打开 **设置 → 对话模型**，选择连接模型，填写服务地址、模型名称与 API Key。
-保存后重启当前使用的服务入口。
-
-模型连接后，问题、相关对话上下文和检索选出的记录片段可能发送到你配置的服务。
-每个新连接的笔记库默认使用本地模式，不会继承其他库的模型权限。
 
 ## 从一个问题开始
 
